@@ -63,7 +63,7 @@ st.write("Upload an image of a Vietnamese ID card for OCR processing")
 def load_paddle_model(model_path):
     """Load the pretrained PaddleOCR model for detection"""
     try:
-        model = PaddleOCR(det_model_dir=model_path, lang='vi')
+        model = PaddleOCR(lang='vi')
         return model
     except Exception as e:
         st.error(f"Error loading PaddleOCR model: {e}")
@@ -98,6 +98,147 @@ def correct_text(text, candidates, threshold=2):
     if levenshtein_distance(text, closest_match) <= threshold:
         return closest_match
     return text
+
+
+def GetInformation(_results):
+
+    # string = '{"ID_number": "09219802508", "Name": "", "Date_of_birth": "", "Gender": "", "Nationality": "", "Place_of_origin": "", "Place_of_residence": "", "ID_number_box": [[208.0, 171.0], [495.0, 177.0], [495.0, 201.0], [208.0, 195.0]]}'
+    # result = json.loads(string)
+
+    result = {}
+    result['ID_number'] = ''
+    result['Name'] = ''
+    result['Date_of_birth'] = ''
+    result['Gender'] = ''
+    result['Nationality'] = ''
+    result['Place_of_origin'] = ''
+    result['Place_of_residence'] = ''
+    result['ID_number_box'] = ''
+
+    regex_dob = r'[0-9][0-9]/[0-9][0-9]'
+    regex_residence = r'[0-9][0-9]/[0-9][0-9]/|[0-9]{4,10}|Date|Demo|Dis|Dec|Dale|fer|ting|gical|ping|exp|ver|pate|cond|trị|đến|không|Không|Có|Pat|ter|ity'
+
+    for i, res in enumerate(_results):
+        s = res[0]
+        print(s)
+        if re.search(r'tên|name', s):
+            ID_number = _results[i+1] if re.search(r'[0-9][0-9][0-9]', (re.split(r':|[.]|\s+', _results[i+1][0]))[-1].strip(
+            )) else (_results[i+2] if re.search(r'[0-9][0-9][0-9]', _results[i+2][0]) else _results[i+3])
+            result['ID_number'] = (
+                re.split(r':|[.]|\s+', ID_number[0]))[-1].strip()
+            result['ID_number_box'] = ID_number[1]
+            Name = _results[i+1] if (not re.search(r'[0-9]',
+                                     _results[i+1][0])) else _results[i+2]
+            result['Name'] = Name[0].title()
+            result['Name_box'] = Name[1] if Name[1] else []
+            if (result['Date_of_birth'] == ''):
+                DOB = _results[i -
+                               2] if re.search(regex_dob, _results[i-2][0]) else []
+                result['Date_of_birth'] = (
+                    re.split(r':|\s+', DOB[0]))[-1].strip() if DOB else ''
+                result['Date_of_birth_box'] = DOB[1] if DOB else []
+            continue
+
+        if re.search(r'sinh|birth|bith', s) and (not result['Date_of_birth']):
+            if re.search(regex_dob, s):
+                DOB = _results[i]
+            elif re.search(regex_dob, _results[i-1][0]):
+                DOB = _results[i-1]
+            elif re.search(regex_dob, _results[i+1][0]):
+                DOB = _results[i+1]
+            else:
+                DOB = []
+            result['Date_of_birth'] = (
+                re.split(r':|\s+', DOB[0]))[-1].strip() if DOB else ''
+            result['Date_of_birth_box'] = DOB[1] if DOB else []
+            if re.search(r"Việt Nam", _results[i+1][0]):
+                result['Nationality'] = 'Việt Nam'
+                result['Nationality_box'] = _results[i+1][1]
+            continue
+        if re.search(r'Giới|Sex', s):
+            Gender = _results[i]
+            result['Gender'] = 'Nữ' if re.search(
+                r'Nữ|nữ', Gender[0]) else 'Nam'
+            result['Gender_box'] = Gender[1] if Gender[1] else []
+        if re.search(r'Quốc|tịch|Nat', s):
+            if (not re.search(r'ty|ing', re.split(r':|,|[.]|ty|tịch', s)[-1].strip()) and (len(re.split(r':|,|[.]|ty|tịch', s)[-1].strip()) >= 3)):
+                Nationality = _results[i]
+            elif not re.search(r'[0-9][0-9]/[0-9][0-9]/', _results[i+1][0]):
+                Nationality = _results[i+1]
+            else:
+                Nationality = _results[i-1]
+            result['Nationality'] = re.split(
+                r':|-|,|[.]|ty|[0-9]|tịch', Nationality[0])[-1].strip().title()
+            result['Nationality_box'] = Nationality[1] if Nationality[1] else []
+            for s in re.split(r'\s+', result['Nationality']):
+                if len(s) < 3:
+                    result['Nationality'] = re.split(
+                        s, result['Nationality'])[-1].strip().title()
+            if re.search(r'Nam', result['Nationality']):
+                result['Nationality'] = 'Việt Nam'
+            continue
+
+        if re.search(r'Quê|origin|ongin|ngin|orging', s):
+            PlaceOfOrigin = [_results[i], _results[i+1]
+                             ] if not re.search(r'[0-9]{4}', _results[i+1][0]) else []
+            if PlaceOfOrigin:
+                if len(re.split(r':|;|of|ging|gin|ggong', PlaceOfOrigin[0][0])[-1].strip()) > 2:
+                    result['Place_of_origin'] = ((re.split(
+                        r':|;|of|ging|gin|ggong', PlaceOfOrigin[0][0]))[-1].strip() + ', ' + PlaceOfOrigin[1][0])
+                else:
+                    result['Place_of_origin'] = PlaceOfOrigin[1][0]
+                result['Place_of_origin_box'] = PlaceOfOrigin[1][1]
+            continue
+        if re.search(r'Nơi|trú|residence', s):
+            vals2 = "" if (
+                i+2 > len(_results)-1) else _results[i+2] if len(_results[i+2][0]) > 5 else _results[-1]
+            vals3 = "" if (
+                i+3 > len(_results)-1) else _results[i+3] if len(_results[i+3][0]) > 5 else _results[-1]
+            if ((re.split(r':|;|residence|ence|end', s))[-1].strip() != ''):
+                if (vals2 != '' and not re.search(regex_residence, vals2[0])):
+                    PlaceOfResidence = [_results[i], vals2]
+                elif (vals3 != '' and not re.search(regex_residence, vals3[0])):
+                    PlaceOfResidence = [_results[i], vals3]
+                elif not re.search(regex_residence, _results[-1][0]):
+                    PlaceOfResidence = [_results[i], _results[-1]]
+                else:
+                    PlaceOfResidence = [_results[-1], []]
+            else:
+                PlaceOfResidence = [vals2, []] if (vals2 and not re.search(
+                    regex_residence, vals2[0])) else [_results[-1], []]
+            if PlaceOfResidence[1]:
+                result['Place_of_residence'] = re.split(r':|;|residence|sidencs|ence|end', PlaceOfResidence[0][0])[
+                    -1].strip() + ' ' + str(PlaceOfResidence[1][0]).strip()
+                result['Place_of_residence_box'] = PlaceOfResidence[1][1]
+            else:
+                result['Place_of_residence'] = PlaceOfResidence[0][0]
+                result['Place_of_residence_box'] = PlaceOfResidence[0][1] if PlaceOfResidence else [
+                ]
+            continue
+        elif (i == len(_results)-1):
+            if result['Place_of_residence'] == '':
+                if not re.search(regex_residence, _results[-1][0]):
+                    PlaceOfResidence = _results[-1]
+                elif not re.search(regex_residence, _results[-2][0]):
+                    PlaceOfResidence = _results[-2]
+                else:
+                    PlaceOfResidence = []
+                result['Place_of_residence'] = PlaceOfResidence[0] if PlaceOfResidence else ''
+                result['Place_of_residence_box'] = PlaceOfResidence[1] if PlaceOfResidence else [
+                ]
+            if result['Gender'] == '':
+                result['Gender_box'] = []
+            if result['Nationality'] == '':
+                result['Nationality_box'] = []
+            if result['Name'] == '':
+                result['Name_box'] = []
+            if result['Date_of_birth'] == '':
+                result['Date_of_birth_box'] = []
+            if result['Place_of_origin'] == '':
+                result['Place_of_origin_box'] = []
+        else:
+            continue
+    return result
 
 
 def apply_nms(boxes, scores=None, nms_thresh=0.3):
@@ -161,6 +302,45 @@ def calculate_iou(box1, box2):
     union_area = box1_area + box2_area - intersection_area
 
     return intersection_area / union_area if union_area > 0 else 0
+
+
+def WarpAndRec(frame, top_left, top_right, bottom_right, bottom_left):
+    w, h, cn = frame.shape
+    padding = 4.0
+    padding = int(padding * w / 640)
+    box = []
+    # All points are in format [cols, rows]
+    pt_A = top_left[0]-padding, top_left[1]-padding
+    pt_B = bottom_left[0]-padding, bottom_left[1]+padding
+    pt_C = bottom_right[0]+padding, bottom_right[1]+padding
+    pt_D = top_right[0]+padding, top_right[1]-padding
+    # Here, I have used L2 norm. You can use L1 also.
+    width_AD = np.sqrt(((pt_A[0] - pt_D[0]) ** 2) + ((pt_A[1] - pt_D[1]) ** 2))
+    width_BC = np.sqrt(((pt_B[0] - pt_C[0]) ** 2) + ((pt_B[1] - pt_C[1]) ** 2))
+    maxWidth = max(int(width_AD), int(width_BC))
+
+    height_AB = np.sqrt(((pt_A[0] - pt_B[0]) ** 2) +
+                        ((pt_A[1] - pt_B[1]) ** 2))
+    height_CD = np.sqrt(((pt_C[0] - pt_D[0]) ** 2) +
+                        ((pt_C[1] - pt_D[1]) ** 2))
+    maxHeight = max(int(height_AB), int(height_CD))
+    input_pts = np.float32([pt_A, pt_B, pt_C, pt_D])
+    output_pts = np.float32([[0, 0],
+                            [0, maxHeight - 1],
+                            [maxWidth - 1, maxHeight - 1],
+                            [maxWidth - 1, 0]])
+    # Compute the perspective transform M
+    M = cv2.getPerspectiveTransform(input_pts, output_pts)
+    matWarped = cv2.warpPerspective(
+        frame, M, (maxWidth, maxHeight), flags=cv2.INTER_LINEAR)
+    # cv2.imwrite(fileName, matWarped)
+
+    s = vietocr_model.predict(Image.fromarray(matWarped))
+    box.append(pt_A)
+    box.append(pt_D)
+    box.append(pt_C)
+    box.append(pt_B)
+    return [s, box]
 
 
 # def Segmentation(text):
@@ -281,45 +461,58 @@ def process_image(image):
         st.error("Models not loaded correctly")
         return None
 
-    imageqr = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    print(type(image))
-    result = paddle_model.ocr(image, cls=False, det=True, rec=False)
-    # decoded_text = qreader.detect_and_decode(
-    #     image=imageqr, return_detections=True)
-    # print("decoded_text", decoded_text)
-    # result_global = paddle_global.ocr(image, cls=False, det=True, rec=False)
-    if not result or len(result) == 0 or result[0] is None:
-        st.warning("No text detected in the image")
-        return None
+    # imageqr = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    res = []
+    result = paddle_model.ocr(image, cls=False, det=True)
 
-    # Extract bounding boxes
-    boxes = []
-    print("result", result[0])
-    for line in result[0]:
-        boxes.append([[int(line[0][0]), int(line[0][1])],
-                      [int(line[2][0]), int(line[2][1])]])
-    boxes = apply_nms(boxes, nms_thresh=0.7)
-    boxes = boxes[::-1]
-    print("box", len(boxes))
-    extracted_texts = []
-    for idx, box in enumerate(boxes):
-        cropped_image = image[box[0][1]:box[1][1], box[0][0]:box[1][0]]
-        try:
-            pil_image = Image.fromarray(
-                cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
-            text = vietocr_model.predict(pil_image)
-            print("text", text)
-            if text and len(text.strip()) > 0 and len(text) >= 2:
-                extracted_texts.append(text)
-        except Exception as e:
-            st.warning(f"Error recognizing text in region {idx}: {e}")
+    # for i, res in enumerate(result[0]):
+    #     box, text = res
+    #     print("res", res)
 
-    structured_info = extract_field_info(extracted_texts)
-    vis_image = draw_ocr(image, result[0], txts=None, scores=None)
+    #     top_left = (int(box[0][0]), int(box[0][1]))
+    #     top_right = (int(box[1][0]), int(box[1][1]))
+    #     bottom_right = (int(box[2][0]), int(box[2][1]))
+    #     bottom_left = (int(box[3][0]), int(box[3][1]))
+    #     t = WarpAndRec(image, top_left, top_right,
+    #                    bottom_right, bottom_left)
+    #     res.append(t)
+
+    info = GetInformation(res)
+    # if not result or len(result) == 0 or result[0] is None:
+    #     st.warning("No text detected in the image")
+    #     return None
+    # boxes = []
+    # print("result", result[0])
+    # for line in result[0]:
+    #     boxes.append([[int(line[0][0]), int(line[0][1])],
+    #                   [int(line[2][0]), int(line[2][1])]])
+    # boxes = apply_nms(boxes, nms_thresh=0.7)
+    # boxes = boxes[::-1]
+    # print("box", len(boxes))
+    # extracted_texts = []
+    # for idx, box in enumerate(boxes):
+    #     cropped_image = image[box[0][1]:box[1][1], box[0][0]:box[1][0]]
+    #     try:
+    #         pil_image = Image.fromarray(
+    #             cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
+    #         text = vietocr_model.predict(pil_image)
+    #         print("text", text)
+    #         if text and len(text.strip()) > 0 and len(text) >= 2:
+    #             extracted_texts.append(text)
+    #     except Exception as e:
+    #         st.warning(f"Error recognizing text in region {idx}: {e}")
+
+    # txt = GetInformation(extracted_texts)
+    # print(txt)
+    # structured_info = extract_field_info(extracted_texts)
+    boxes = [res[0] for res in result[0]]
+    txts = [res[1][0] for res in result[0]]
+    scores = [res[1][1] for res in result[0]]
+    vis_image = draw_ocr(image, boxes, txts=None, scores=None)
     return {
         "visualization": vis_image,
-        "texts": extracted_texts,
-        "structured_info": structured_info
+        "texts": "",
+        "structured_info": info
     }
 
 
