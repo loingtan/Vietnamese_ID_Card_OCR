@@ -63,7 +63,7 @@ st.write("Upload an image of a Vietnamese ID card for OCR processing")
 def load_paddle_model(model_path):
     """Load the pretrained PaddleOCR model for detection"""
     try:
-        model = PaddleOCR(lang='vi')
+        model = PaddleOCR(det_model_dir="infer_model")
         return model
     except Exception as e:
         st.error(f"Error loading PaddleOCR model: {e}")
@@ -114,10 +114,8 @@ def GetInformation(_results):
     result['Place_of_origin'] = ''
     result['Place_of_residence'] = ''
     result['ID_number_box'] = ''
-
     regex_dob = r'[0-9][0-9]/[0-9][0-9]'
     regex_residence = r'[0-9][0-9]/[0-9][0-9]/|[0-9]{4,10}|Date|Demo|Dis|Dec|Dale|fer|ting|gical|ping|exp|ver|pate|cond|trị|đến|không|Không|Có|Pat|ter|ity'
-
     for i, res in enumerate(_results):
         s = res[0]
         print(s)
@@ -461,21 +459,18 @@ def process_image(image):
         st.error("Models not loaded correctly")
         return None
 
-    # imageqr = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image_detect = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     res = []
-    result = paddle_model.ocr(image, cls=False, det=True)
+    result = paddle_model.ocr(image, cls=False, det=True, rec=False)
 
-    # for i, res in enumerate(result[0]):
-    #     box, text = res
-    #     print("res", res)
-
-    #     top_left = (int(box[0][0]), int(box[0][1]))
-    #     top_right = (int(box[1][0]), int(box[1][1]))
-    #     bottom_right = (int(box[2][0]), int(box[2][1]))
-    #     bottom_left = (int(box[3][0]), int(box[3][1]))
-    #     t = WarpAndRec(image, top_left, top_right,
-    #                    bottom_right, bottom_left)
-    #     res.append(t)
+    for i, box in enumerate(result[0]):
+        top_left = (int(box[0][0]), int(box[0][1]))
+        top_right = (int(box[1][0]), int(box[1][1]))
+        bottom_right = (int(box[2][0]), int(box[2][1]))
+        bottom_left = (int(box[3][0]), int(box[3][1]))
+        t = WarpAndRec(image, top_left, top_right,
+                       bottom_right, bottom_left)
+        res.append(t)
 
     info = GetInformation(res)
     # if not result or len(result) == 0 or result[0] is None:
@@ -505,10 +500,8 @@ def process_image(image):
     # txt = GetInformation(extracted_texts)
     # print(txt)
     # structured_info = extract_field_info(extracted_texts)
-    boxes = [res[0] for res in result[0]]
-    txts = [res[1][0] for res in result[0]]
-    scores = [res[1][1] for res in result[0]]
-    vis_image = draw_ocr(image, boxes, txts=None, scores=None)
+
+    vis_image = draw_ocr(image, result[0], txts=None, scores=None)
     return {
         "visualization": vis_image,
         "texts": "",
