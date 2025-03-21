@@ -4,6 +4,8 @@ from PIL import Image
 import streamlit as st
 import cv2
 import numpy as np
+import torch
+from ultralytics import YOLO
 from paddleocr import PaddleOCR, draw_ocr
 from vietocr.tool.predictor import Predictor
 from vietocr.tool.config import Cfg
@@ -15,6 +17,10 @@ from transformers import pipeline
 from Levenshtein import distance as levenshtein_distance
 corrector = pipeline("text2text-generation",
                      model="bmd1905/vietnamese-correction-v2")
+
+
+# Select device (GPU if available, otherwise CPU)
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # @st.cache_resource(show_spinner="Loading NER model...")
 # def load_vncorenlp_model():
@@ -83,6 +89,17 @@ def load_vietocr_model():
         st.error(f"Error loading VietOCR model: {e}")
         return None
 
+@st.cache_resource
+def load_yolo_model():
+    """Load YOLO model for ID card detection"""
+    try:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = YOLO("best.pt")  # Load custom trained model
+        model.to(device)
+        return model
+    except Exception as e:
+        st.error(f"Error loading YOLO model: {e}")
+        return None
 
 paddle_model = load_paddle_model("det_db_inference2")
 # paddle_global = PaddleOCR(use_angle_cls=True, lang='vi',
@@ -451,6 +468,153 @@ def safe_detect(text):
         return detect(text)
     except LangDetectException:
         return "unknown"
+    
+def calculate_missed_coord_corner(corners):
+    """Calculates the missing fourth corner based on the other three detected corners."""
+    if len(corners) != 3:
+        return corners  # Return as is if the length is not 3
+
+    # Convert list to NumPy array for easier manipulation
+    corners = np.array(corners, dtype='float32')
+    
+    # Calculate the centroid of the three given points
+    centroid = np.mean(corners, axis=0)
+    
+    # Find the vector from the centroid to each point
+    vectors = corners - centroid
+    
+    # The missing point should complete the parallelogram, so we assume it lies opposite
+    # to the centroid with respect to the sum of the vectors.
+    missing_corner = centroid - np.sum(vectors, axis=0)
+    
+    # Append the calculated corner to the list
+    corners = np.vstack([corners, missing_corner])
+    return corners.tolist()
+
+def order_points(pts):
+    """Orders points in (top-left, top-right, bottom-right, bottom-left) order."""
+    rect = np.zeros((4, 2), dtype='float32')
+    s = pts.sum(axis=1)
+    rect[0] = pts[np.argmin(s)]  # Top-left
+    rect[2] = pts[np.argmax(s)]  # Bottom-right
+    diff = np.diff(pts, axis=1)
+    rect[1] = pts[np.argmin(diff)]  # Top-right
+    rect[3] = pts[np.argmax(diff)]  # Bottom-left
+    return rect
+
+def four_point_transform(image, pts):
+    """Applies a perspective transform to get a top-down view of the ID."""
+    rect = order_points(pts)
+    (tl, tr, br, bl) = rect
+
+    widthA = np.linalg.norm(br - bl)
+    widthB = np.linalg.norm(tr - tl)
+    maxWidth = int(max(widthA, widthB))
+
+    heightA = np.linalg.norm(tr - br)
+    heightB = np.linalg.norm(tl - bl)
+    maxHeight = int(max(heightA, heightB))
+
+    dst = np.array([
+        [0, 0],
+        [maxWidth - 1, 0],
+        [maxWidth - 1, maxHeight - 1],
+        [0, maxHeight - 1]
+    ], dtype='float32')
+
+    M = cv2.getPerspectiveTransform(rect, dst)
+    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight), flags=cv2.INTER_LINEAR)
+
+    return warped
+
+def corner_preprocess_image(image, device):
+    """Automatically adjusts tensor shape for YOLO model input."""
+    h, w, _ = image.shape
+    size = max(h, w)
+    padded_image = np.zeros((size, size, 3), dtype=np.uint8)
+    padded_image[:h, :w, :] = image
+    image_resized = cv2.resize(padded_image, (640, 640))
+    image_tensor = torch.from_numpy(image_resized).permute(2, 0, 1).float().div(255.0).unsqueeze(0).to(device)
+    return image_tensor
+
+## For taking the center points of each corner bounding box
+def detect_id_card(image, model, device):
+    """Detects the ID card using YOLO and extracts precise center points of bounding boxes."""
+    image_tensor = corner_preprocess_image(image, device)
+    results = model(image_tensor)
+
+    # Initialize list to store detected corner points
+    corners = []
+    
+    for result in results:
+        for box in result.boxes.xyxy:
+            x_min, y_min, x_max, y_max = map(int, box)  # Get bounding box coordinates
+            center_x = (x_min + x_max) // 2
+            center_y = (y_min + y_max) // 2
+            corners.append([center_x, center_y])
+    
+    st.write(corners)
+    
+    # Ensure exactly four corners are detected
+    if len(corners) == 3:
+        corners = calculate_missed_coord_corner(corners)
+    
+    if len(corners) == 4:
+        corners = np.array(corners, dtype='float32')
+        cropped = four_point_transform(image, corners)
+        return cropped  # Return the processed image
+    else:
+        st.error("Did not detect exactly four corners.")
+        return None
+
+# # For taking the further corner points of each corner bounding box   
+# def detect_id_card(image, model, device):
+#     """Detects the ID card using YOLO and extracts precise center points of bounding boxes."""
+#     image_tensor = corner_preprocess_image(image, device)
+#     results = model(image_tensor)
+    
+#     # Initialize variables for the four corners
+#     top_left = None
+#     top_right = None
+#     bottom_right = None
+#     bottom_left = None
+
+#     for result in results:
+#         for box in result.boxes.xyxy:
+#             x_min, y_min, x_max, y_max = map(int, box)  # Get bounding box coordinates
+
+#             # Determine which corner this bounding box belongs to
+#             if top_left is None or (x_min + y_min) < sum(top_left):
+#                 top_left = [x_min, y_min]  # Take top-left point
+
+#             if top_right is None or (x_max - y_min) > (top_right[0] - top_right[1]):
+#                 top_right = [x_max, y_min]  # Take top-right point
+
+#             if bottom_right is None or (x_max + y_max) > sum(bottom_right):
+#                 bottom_right = [x_max, y_max]  # Take bottom-right point
+
+#             if bottom_left is None or (x_min - y_max) < (bottom_left[0] - bottom_left[1]):
+#                 bottom_left = [x_min, y_max]  # Take bottom-left point
+#     # Check if 3 corners were detected
+#     if len([c for c in [top_left, top_right, bottom_right, bottom_left] if c is not None]) == 3:
+#         # Calculate the missing corner
+#         corners = calculate_missed_coord_corner([c for c in [top_left, top_right, bottom_right, bottom_left] if c is not None])
+#         top_left, top_right, bottom_right, bottom_left = corners
+    
+#     # Ensure all four corners were detected
+#     if None not in (top_left, top_right, bottom_right, bottom_left):
+#         corners = np.array([top_left, top_right, bottom_right, bottom_left], dtype="float32")
+
+#         return four_point_transform(image, corners)
+#     else:
+#         st.error("Did not detect exactly four corners.")
+#         return None
+
+def sharpen_image(image):
+    """Sharpen the image using an unsharp mask."""
+    gaussian_blurred = cv2.GaussianBlur(image, (0, 0), 3)  # Apply Gaussian blur
+    sharpened = cv2.addWeighted(image, 1.5, gaussian_blurred, -0.5, 0)  # Add weighted mask
+    return sharpened
 
 
 def process_image(image):
@@ -459,10 +623,31 @@ def process_image(image):
         st.error("Models not loaded correctly")
         return None
 
-    image_detect = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    res = []
-    result = paddle_model.ocr(image, cls=False, det=True, rec=False)
+    # Ensure YOLO model is loaded
+    yolo_model = load_yolo_model()  
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    corner_cropped_image = detect_id_card(image, yolo_model, device)
+
+    res = []
+    
+    if corner_cropped_image is None:
+        image = sharpen_image(image)
+        result = paddle_model.ocr(image, cls=False, det=True, rec=False)
+        vis_image = draw_ocr(image, result[0], txts=None, scores=None)
+        #return None
+    else: 
+        corner_cropped_image = sharpen_image(corner_cropped_image)
+        result = paddle_model.ocr(corner_cropped_image, cls=False, det=True, rec=False)
+        vis_image = draw_ocr(corner_cropped_image, result[0], txts=None, scores=None)
+    # image_detect = cv2.cvtColor(corner_cropped_image, cv2.COLOR_BGR2RGB)
+    
+    # OCR Processing
+    
+    #result = paddle_model.ocr(corner_cropped_image, cls=False, det=True, rec=False)
+    if not result or len(result) == 0 or result[0] is None:
+        st.warning("No text detected in the image")
+        return None
     for i, box in enumerate(result[0]):
         top_left = (int(box[0][0]), int(box[0][1]))
         top_right = (int(box[1][0]), int(box[1][1]))
@@ -501,7 +686,7 @@ def process_image(image):
     # print(txt)
     # structured_info = extract_field_info(extracted_texts)
 
-    vis_image = draw_ocr(image, result[0], txts=None, scores=None)
+    # vis_image = draw_ocr(corner_cropped_image, result[0], txts=None, scores=None)
     return {
         "visualization": vis_image,
         "texts": "",
