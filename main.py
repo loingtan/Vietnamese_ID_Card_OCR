@@ -66,7 +66,7 @@ st.write("Upload an image of a Vietnamese ID card for OCR processing")
 
 
 @st.cache_resource
-def load_paddle_model(model_path):
+def load_paddle_model():
     """Load the pretrained PaddleOCR model for detection"""
     try:
         model = PaddleOCR(det_model_dir="infer_model")
@@ -89,6 +89,20 @@ def load_vietocr_model():
         st.error(f"Error loading VietOCR model: {e}")
         return None
 
+
+@st.cache_resource
+def load_yolo_model_for_detect_text():
+    """Load YOLO model for text detection"""
+    try:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = YOLO(r"yolo_detect_text/best.pt")
+        model.to(device)
+        return model
+    except Exception as e:
+        st.error(f"Error loading YOLO model: {e}")
+        return None
+
+
 @st.cache_resource
 def load_yolo_model():
     """Load YOLO model for ID card detection"""
@@ -101,10 +115,12 @@ def load_yolo_model():
         st.error(f"Error loading YOLO model: {e}")
         return None
 
-paddle_model = load_paddle_model("det_db_inference2")
+
+paddle_model = load_paddle_model()
 # paddle_global = PaddleOCR(use_angle_cls=True, lang='vi',
 #                           det=False, rec=True, cls=True)
 vietocr_model = load_vietocr_model()
+detect_model = load_yolo_model_for_detect_text()
 # Create a QReader instance
 qreader = QReader()
 
@@ -258,30 +274,22 @@ def GetInformation(_results):
 
 def apply_nms(boxes, scores=None, nms_thresh=0.3):
     """Apply Non-Maximum Suppression to eliminate overlapping boxes"""
-    if not boxes or len(boxes) == 0:
+    if len(boxes) == 0:
         return []
 
     # If no scores provided, assume all boxes have equal confidence
     if scores is None:
         scores = np.ones(len(boxes))
-
     EXPEND = 3
-    for box in boxes:
-        box[0][0] = box[0][0] - EXPEND
-        box[0][1] = box[0][1] - EXPEND
-        box[1][0] = box[1][0] + EXPEND
-        box[1][1] = box[1][1] + EXPEND
-    boxes_for_nms = []
-    for box in boxes:
-        x1, y1 = box[0]
-        x2, y2 = box[1]
-        boxes_for_nms.append([x1, y1, x2, y2])
-
-    boxes_for_nms = np.array(boxes_for_nms)
+    expanded_boxes = boxes.copy()
+    for i, box in enumerate(expanded_boxes):
+        x1, y1, x2, y2 = box
+        expanded_boxes[i] = [max(0, x1-EXPEND), max(0, y1-EXPEND),
+                             x2+EXPEND, y2+EXPEND]
 
     # Apply NMS
     indices = cv2.dnn.NMSBoxes(
-        boxes_for_nms.tolist(), scores.tolist(), 0.5, nms_thresh)
+        expanded_boxes.tolist(), scores.tolist(), 0.5, nms_thresh)
 
     # Return filtered boxes
     filtered_boxes = []
@@ -358,17 +366,17 @@ def WarpAndRec(frame, top_left, top_right, bottom_right, bottom_left):
     return [s, box]
 
 
-# def Segmentation(text):
-#     exp = ""
-#     ner_results = nlp2(text)
-#     for e in ner_results:
-#         if "##" in e["word"]:
-#             exp = exp + e["word"].replace("##", "")
-#         elif e["entity"] == "I":
-#             exp = exp + "_" + e["word"]
-#         else:
-#             exp = exp + " " + e["word"]
-#     return exp
+def Segmentation(text):
+    exp = ""
+    ner_results = nlp2(text)
+    for e in ner_results:
+        if "##" in e["word"]:
+            exp = exp + e["word"].replace("##", "")
+        elif e["entity"] == "I":
+            exp = exp + "_" + e["word"]
+        else:
+            exp = exp + " " + e["word"]
+    return exp
 
 
 def extract_entities(ner_data, entity_type):
@@ -468,7 +476,8 @@ def safe_detect(text):
         return detect(text)
     except LangDetectException:
         return "unknown"
-    
+
+
 def calculate_missed_coord_corner(corners):
     """Calculates the missing fourth corner based on the other three detected corners."""
     if len(corners) != 3:
@@ -476,20 +485,21 @@ def calculate_missed_coord_corner(corners):
 
     # Convert list to NumPy array for easier manipulation
     corners = np.array(corners, dtype='float32')
-    
+
     # Calculate the centroid of the three given points
     centroid = np.mean(corners, axis=0)
-    
+
     # Find the vector from the centroid to each point
     vectors = corners - centroid
-    
+
     # The missing point should complete the parallelogram, so we assume it lies opposite
     # to the centroid with respect to the sum of the vectors.
     missing_corner = centroid - np.sum(vectors, axis=0)
-    
+
     # Append the calculated corner to the list
     corners = np.vstack([corners, missing_corner])
     return corners.tolist()
+
 
 def order_points(pts):
     """Orders points in (top-left, top-right, bottom-right, bottom-left) order."""
@@ -502,17 +512,41 @@ def order_points(pts):
     rect[3] = pts[np.argmax(diff)]  # Bottom-left
     return rect
 
-def four_point_transform(image, pts):
-    """Applies a perspective transform to get a top-down view of the ID."""
+
+def four_point_transform(image, pts, bottom_extension=0.1):
+    """
+    Applies a perspective transform to get a top-down view of the ID,
+    with more visibility of the bottom portion.
+
+    Args:
+        image: Input image
+        pts: Four points defining the ID card quadrilateral
+        bottom_extension: Factor to extend the bottom (0.15 = 15% extra)
+    """
     rect = order_points(pts)
     (tl, tr, br, bl) = rect
 
-    widthA = np.linalg.norm(br - bl)
+    # Calculate vectors from top to bottom points
+    right_vector = br - tr
+    left_vector = bl - tl
+
+    # Extend bottom points downward
+    br_extended = br + (right_vector / np.linalg.norm(right_vector)) * \
+        (np.linalg.norm(right_vector) * bottom_extension)
+    bl_extended = bl + (left_vector / np.linalg.norm(left_vector)) * \
+        (np.linalg.norm(left_vector) * bottom_extension)
+
+    # Use extended points for the transform
+    rect_extended = np.array(
+        [tl, tr, br_extended, bl_extended], dtype='float32')
+
+    # Calculate dimensions based on extended points
+    widthA = np.linalg.norm(br_extended - bl_extended)
     widthB = np.linalg.norm(tr - tl)
     maxWidth = int(max(widthA, widthB))
 
-    heightA = np.linalg.norm(tr - br)
-    heightB = np.linalg.norm(tl - bl)
+    heightA = np.linalg.norm(tr - br_extended)
+    heightB = np.linalg.norm(tl - bl_extended)
     maxHeight = int(max(heightA, heightB))
 
     dst = np.array([
@@ -522,10 +556,12 @@ def four_point_transform(image, pts):
         [0, maxHeight - 1]
     ], dtype='float32')
 
-    M = cv2.getPerspectiveTransform(rect, dst)
-    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight), flags=cv2.INTER_LINEAR)
+    M = cv2.getPerspectiveTransform(rect_extended, dst)
+    warped = cv2.warpPerspective(
+        image, M, (maxWidth, maxHeight), flags=cv2.INTER_LINEAR)
 
     return warped
+
 
 def corner_preprocess_image(image, device):
     """Automatically adjusts tensor shape for YOLO model input."""
@@ -534,10 +570,13 @@ def corner_preprocess_image(image, device):
     padded_image = np.zeros((size, size, 3), dtype=np.uint8)
     padded_image[:h, :w, :] = image
     image_resized = cv2.resize(padded_image, (640, 640))
-    image_tensor = torch.from_numpy(image_resized).permute(2, 0, 1).float().div(255.0).unsqueeze(0).to(device)
+    image_tensor = torch.from_numpy(image_resized).permute(
+        2, 0, 1).float().div(255.0).unsqueeze(0).to(device)
     return image_tensor
 
-## For taking the center points of each corner bounding box
+# For taking the center points of each corner bounding box
+
+
 def detect_id_card(image, model, device):
     """Detects the ID card using YOLO and extracts precise center points of bounding boxes."""
     image_tensor = corner_preprocess_image(image, device)
@@ -545,20 +584,21 @@ def detect_id_card(image, model, device):
 
     # Initialize list to store detected corner points
     corners = []
-    
+
     for result in results:
         for box in result.boxes.xyxy:
-            x_min, y_min, x_max, y_max = map(int, box)  # Get bounding box coordinates
+            # Get bounding box coordinates
+            x_min, y_min, x_max, y_max = map(int, box)
             center_x = (x_min + x_max) // 2
             center_y = (y_min + y_max) // 2
             corners.append([center_x, center_y])
-    
+
     st.write(corners)
-    
+
     # Ensure exactly four corners are detected
     if len(corners) == 3:
         corners = calculate_missed_coord_corner(corners)
-    
+
     if len(corners) == 4:
         corners = np.array(corners, dtype='float32')
         cropped = four_point_transform(image, corners)
@@ -567,12 +607,12 @@ def detect_id_card(image, model, device):
         st.error("Did not detect exactly four corners.")
         return None
 
-# # For taking the further corner points of each corner bounding box   
+# # For taking the further corner points of each corner bounding box
 # def detect_id_card(image, model, device):
 #     """Detects the ID card using YOLO and extracts precise center points of bounding boxes."""
 #     image_tensor = corner_preprocess_image(image, device)
 #     results = model(image_tensor)
-    
+
 #     # Initialize variables for the four corners
 #     top_left = None
 #     top_right = None
@@ -600,7 +640,7 @@ def detect_id_card(image, model, device):
 #         # Calculate the missing corner
 #         corners = calculate_missed_coord_corner([c for c in [top_left, top_right, bottom_right, bottom_left] if c is not None])
 #         top_left, top_right, bottom_right, bottom_left = corners
-    
+
 #     # Ensure all four corners were detected
 #     if None not in (top_left, top_right, bottom_right, bottom_left):
 #         corners = np.array([top_left, top_right, bottom_right, bottom_left], dtype="float32")
@@ -610,54 +650,99 @@ def detect_id_card(image, model, device):
 #         st.error("Did not detect exactly four corners.")
 #         return None
 
+
 def sharpen_image(image):
     """Sharpen the image using an unsharp mask."""
-    gaussian_blurred = cv2.GaussianBlur(image, (0, 0), 3)  # Apply Gaussian blur
-    sharpened = cv2.addWeighted(image, 1.5, gaussian_blurred, -0.5, 0)  # Add weighted mask
+    gaussian_blurred = cv2.GaussianBlur(
+        image, (0, 0), 3)  # Apply Gaussian blur
+    sharpened = cv2.addWeighted(
+        image, 1.5, gaussian_blurred, -0.5, 0)  # Add weighted mask
     return sharpened
 
 
-def process_image(image):
+def draw_yolo(results, image):
+    for result in results:
+        # Get top-left and bottom-right corners
+        boxes = result.boxes.xyxy.cpu().numpy()
+        confidences = result.boxes.conf.cpu().numpy()  # Confidence scores
+        class_ids = result.boxes.cls.cpu().numpy().astype(int)  # Class IDs
+        class_names = [result.names[cls]
+                       for cls in class_ids]  # Get class names
+        print(boxes, confidences, class_names)
+        boxes = apply_nms(boxes, confidences, nms_thresh=0.5)
+        info = {}
+        for box, conf, class_name in zip(boxes, confidences, class_names):
+            x1, y1, x2, y2 = map(int, box)
+            if class_name == "qr":
+                continue
+            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+            label = f"{class_name} ({conf:.2f})"
+            cropped_image = image[y1:y2, x1:x2]
+            pil_image = Image.fromarray(
+                cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
+            text = vietocr_model.predict(pil_image)
+            info[class_name] = text
+
+    return (image, info)
+
+
+def load_model_select(model="yolo", image=None):
+    if model == "yolo":
+        result = detect_model(image)
+        (vis_image, info) = draw_yolo(result, image)
+
+    elif model == "paddle":
+        result = paddle_model.ocr(image, cls=False, det=True, rec=False)
+        vis_image = draw_ocr(image, result[0], txts=None, scores=None)
+        res = []
+        for i, box in enumerate(result[0]):
+            top_left = (int(box[0][0]), int(box[0][1]))
+            top_right = (int(box[1][0]), int(box[1][1]))
+            bottom_right = (int(box[2][0]), int(box[2][1]))
+            bottom_left = (int(box[3][0]), int(box[3][1]))
+            t = WarpAndRec(image, top_left, top_right,
+                           bottom_right, bottom_left)
+            res.append(t)
+        info = GetInformation(res)
+    return info, vis_image
+
+
+def process_image(image, select_model="yolo"):
     """Process the image using PaddleOCR and VietOCR"""
     if paddle_model is None or vietocr_model is None:
         st.error("Models not loaded correctly")
         return None
 
     # Ensure YOLO model is loaded
-    yolo_model = load_yolo_model()  
+    yolo_model = load_yolo_model()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     corner_cropped_image = detect_id_card(image, yolo_model, device)
 
-    res = []
-    
+    height, width, channels = corner_cropped_image.shape
+
+    print(f"Image dimensions: {width}x{height} pixels")
     if corner_cropped_image is None:
         image = sharpen_image(image)
-        result = paddle_model.ocr(image, cls=False, det=True, rec=False)
-        vis_image = draw_ocr(image, result[0], txts=None, scores=None)
-        #return None
-    else: 
-        corner_cropped_image = sharpen_image(corner_cropped_image)
-        result = paddle_model.ocr(corner_cropped_image, cls=False, det=True, rec=False)
-        vis_image = draw_ocr(corner_cropped_image, result[0], txts=None, scores=None)
-    # image_detect = cv2.cvtColor(corner_cropped_image, cv2.COLOR_BGR2RGB)
-    
-    # OCR Processing
-    
-    #result = paddle_model.ocr(corner_cropped_image, cls=False, det=True, rec=False)
-    if not result or len(result) == 0 or result[0] is None:
-        st.warning("No text detected in the image")
-        return None
-    for i, box in enumerate(result[0]):
-        top_left = (int(box[0][0]), int(box[0][1]))
-        top_right = (int(box[1][0]), int(box[1][1]))
-        bottom_right = (int(box[2][0]), int(box[2][1]))
-        bottom_left = (int(box[3][0]), int(box[3][1]))
-        t = WarpAndRec(image, top_left, top_right,
-                       bottom_right, bottom_left)
-        res.append(t)
+        info, vis_image = load_model_select(select_model, image)
+        # return None
+    else:
+        height, width, channels = corner_cropped_image.shape
+        print(f"Original dimensions: {width}x{height} pixels")
 
-    info = GetInformation(res)
+        # Calculate new dimensions (1.5x larger)
+        new_width = int(width * 2)
+        new_height = int(height * 2)
+
+        # Resize the image
+        corner_cropped_image = cv2.resize(corner_cropped_image, (new_width, new_height),
+                                          interpolation=cv2.INTER_LINEAR)
+
+        height, width, channels = corner_cropped_image.shape
+        print(f"New dimensions: {width}x{height} pixels")
+        corner_cropped_image = sharpen_image(corner_cropped_image)
+        info, vis_image = load_model_select(select_model, corner_cropped_image)
     # if not result or len(result) == 0 or result[0] is None:
     #     st.warning("No text detected in the image")
     #     return None
@@ -689,6 +774,7 @@ def process_image(image):
     # vis_image = draw_ocr(corner_cropped_image, result[0], txts=None, scores=None)
     return {
         "visualization": vis_image,
+        "croppedImage": corner_cropped_image,
         "texts": "",
         "structured_info": info
     }
@@ -696,10 +782,15 @@ def process_image(image):
 
 uploaded_file = st.file_uploader(
     "Choose an image...", type=["jpg", "jpeg", "png"])
-
+with st.sidebar:
+    detection_model = st.selectbox(
+        "Select detection model",
+        options=["yolo", "paddle"],
+        help="YOLO: Uses YOLO model for text detection\nPaddle: Uses PaddleOCR's DB algorithm"
+    )
 if uploaded_file is not None:
     # Create two columns for display
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     # Read image
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
@@ -714,44 +805,49 @@ if uploaded_file is not None:
     # Process button
     if st.button("Process ID Card"):
         with st.spinner('Processing image...'):
-            result = process_image(image)
+            result = process_image(image, detection_model)
 
             if result:
-                # Display visualized image with bounding boxes
+
                 with col2:
-                    st.subheader("Detected Regions")
+                    # Display processed image
+                    st.subheader("Processed Image")
                     st.image(cv2.cvtColor(
-                        result["visualization"], cv2.COLOR_BGR2RGB), use_container_width=True)
+                        result["croppedImage"], cv2.COLOR_BGR2RGB), use_container_width=True)
+                    with col3:
+                        st.subheader("Detected Regions")
+                        st.image(cv2.cvtColor(
+                            result["visualization"], cv2.COLOR_BGR2RGB), use_container_width=True)
 
-                # Display extracted information
-                st.subheader("Extracted Information")
+                    # Display extracted information
+                    st.subheader("Extracted Information")
 
-                # Display structured information in a table
-                for field, value in result["structured_info"].items():
-                    if value:
-                        st.info(f"**{field}**: {value}")
-                    else:
-                        st.warning(f"**{field}**: Not detected")
+                    # Display structured information in a table
+                    for field, value in result["structured_info"].items():
+                        if value:
+                            st.info(f"**{field}**: {value}")
+                        else:
+                            st.warning(f"**{field}**: Not detected")
 
-                # Show all detected text
-                with st.expander("All Detected Text"):
-                    for idx, text in enumerate(result["texts"]):
-                        st.write(f"{idx + 1}. {text}")
+                    # # Show all detected text
+                    # with st.expander("All Detected Text"):
+                    #     for idx, text in enumerate(result["texts"]):
+                    #         st.write(f"{idx + 1}. {text}")
 
-                # Option to download results as CSV
-                import pandas as pd
-                import io
+                    # Option to download results as CSV
+                    import pandas as pd
+                    import io
 
-                df = pd.DataFrame([result["structured_info"]])
-                csv = df.to_csv(index=False).encode('utf-8')
+                    df = pd.DataFrame([result["structured_info"]])
+                    csv = df.to_csv(index=False).encode('utf-8')
 
-                st.download_button(
-                    "Download Results as CSV",
-                    csv,
-                    "id_card_results.csv",
-                    "text/csv",
-                    key='download-csv'
-                )
+                    st.download_button(
+                        "Download Results as CSV",
+                        csv,
+                        "id_card_results.csv",
+                        "text/csv",
+                        key='download-csv'
+                    )
 else:
     st.info("Please upload an image to begin processing")
 
