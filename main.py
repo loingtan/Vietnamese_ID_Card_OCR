@@ -95,7 +95,7 @@ def load_yolo_model_for_detect_text():
     """Load YOLO model for text detection"""
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = YOLO(r"yolo_detect_text/best.pt")
+        model = YOLO(r"yolo_detect_text/bestv2.pt")
         model.to(device)
         return model
     except Exception as e:
@@ -366,17 +366,17 @@ def WarpAndRec(frame, top_left, top_right, bottom_right, bottom_left):
     return [s, box]
 
 
-def Segmentation(text):
-    exp = ""
-    ner_results = nlp2(text)
-    for e in ner_results:
-        if "##" in e["word"]:
-            exp = exp + e["word"].replace("##", "")
-        elif e["entity"] == "I":
-            exp = exp + "_" + e["word"]
-        else:
-            exp = exp + " " + e["word"]
-    return exp
+# def Segmentation(text):
+#     exp = ""
+#     ner_results = nlp2(text)
+#     for e in ner_results:
+#         if "##" in e["word"]:
+#             exp = exp + e["word"].replace("##", "")
+#         elif e["entity"] == "I":
+#             exp = exp + "_" + e["word"]
+#         else:
+#             exp = exp + " " + e["word"]
+#     return exp
 
 
 def extract_entities(ner_data, entity_type):
