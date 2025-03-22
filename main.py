@@ -1,4 +1,3 @@
-
 from transformers import AutoTokenizer, AutoModelForTokenClassification
 from PIL import Image
 import streamlit as st
@@ -15,6 +14,7 @@ import py_vncorenlp
 from langdetect import detect, LangDetectException
 from transformers import pipeline
 from Levenshtein import distance as levenshtein_distance
+
 corrector = pipeline("text2text-generation",
                      model="bmd1905/vietnamese-correction-v2")
 
@@ -82,7 +82,7 @@ def load_vietocr_model():
     try:
         config = Cfg.load_config_from_name('vgg_transformer')
         config['cnn']['pretrained'] = True
-        config['device'] = 'cpu'
+        config['device'] = device
         predictor = Predictor(config)
         return predictor
     except Exception as e:
@@ -478,91 +478,6 @@ def safe_detect(text):
         return "unknown"
 
 
-def calculate_missed_coord_corner(corners):
-    """Calculates the missing fourth corner based on the other three detected corners."""
-    if len(corners) != 3:
-        return corners  # Return as is if the length is not 3
-
-    # Convert list to NumPy array for easier manipulation
-    corners = np.array(corners, dtype='float32')
-
-    # Calculate the centroid of the three given points
-    centroid = np.mean(corners, axis=0)
-
-    # Find the vector from the centroid to each point
-    vectors = corners - centroid
-
-    # The missing point should complete the parallelogram, so we assume it lies opposite
-    # to the centroid with respect to the sum of the vectors.
-    missing_corner = centroid - np.sum(vectors, axis=0)
-
-    # Append the calculated corner to the list
-    corners = np.vstack([corners, missing_corner])
-    return corners.tolist()
-
-
-def order_points(pts):
-    """Orders points in (top-left, top-right, bottom-right, bottom-left) order."""
-    rect = np.zeros((4, 2), dtype='float32')
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]  # Top-left
-    rect[2] = pts[np.argmax(s)]  # Bottom-right
-    diff = np.diff(pts, axis=1)
-    rect[1] = pts[np.argmin(diff)]  # Top-right
-    rect[3] = pts[np.argmax(diff)]  # Bottom-left
-    return rect
-
-
-def four_point_transform(image, pts, bottom_extension=0.1):
-    """
-    Applies a perspective transform to get a top-down view of the ID,
-    with more visibility of the bottom portion.
-
-    Args:
-        image: Input image
-        pts: Four points defining the ID card quadrilateral
-        bottom_extension: Factor to extend the bottom (0.15 = 15% extra)
-    """
-    rect = order_points(pts)
-    (tl, tr, br, bl) = rect
-
-    # Calculate vectors from top to bottom points
-    right_vector = br - tr
-    left_vector = bl - tl
-
-    # Extend bottom points downward
-    br_extended = br + (right_vector / np.linalg.norm(right_vector)) * \
-        (np.linalg.norm(right_vector) * bottom_extension)
-    bl_extended = bl + (left_vector / np.linalg.norm(left_vector)) * \
-        (np.linalg.norm(left_vector) * bottom_extension)
-
-    # Use extended points for the transform
-    rect_extended = np.array(
-        [tl, tr, br_extended, bl_extended], dtype='float32')
-
-    # Calculate dimensions based on extended points
-    widthA = np.linalg.norm(br_extended - bl_extended)
-    widthB = np.linalg.norm(tr - tl)
-    maxWidth = int(max(widthA, widthB))
-
-    heightA = np.linalg.norm(tr - br_extended)
-    heightB = np.linalg.norm(tl - bl_extended)
-    maxHeight = int(max(heightA, heightB))
-
-    dst = np.array([
-        [0, 0],
-        [maxWidth - 1, 0],
-        [maxWidth - 1, maxHeight - 1],
-        [0, maxHeight - 1]
-    ], dtype='float32')
-
-    M = cv2.getPerspectiveTransform(rect_extended, dst)
-    warped = cv2.warpPerspective(
-        image, M, (maxWidth, maxHeight), flags=cv2.INTER_LINEAR)
-
-    return warped
-
-
 def corner_preprocess_image(image, device):
     """Automatically adjusts tensor shape for YOLO model input."""
     h, w, _ = image.shape
@@ -573,92 +488,6 @@ def corner_preprocess_image(image, device):
     image_tensor = torch.from_numpy(image_resized).permute(
         2, 0, 1).float().div(255.0).unsqueeze(0).to(device)
     return image_tensor
-
-# For taking the center points of each corner bounding box
-
-
-def detect_id_card(image, model, device):
-    """Detects the ID card using YOLO and extracts precise center points of bounding boxes."""
-    image_tensor = corner_preprocess_image(image, device)
-    results = model(image_tensor)
-
-    # Initialize list to store detected corner points
-    corners = []
-
-    for result in results:
-        for box in result.boxes.xyxy:
-            # Get bounding box coordinates
-            x_min, y_min, x_max, y_max = map(int, box)
-            center_x = (x_min + x_max) // 2
-            center_y = (y_min + y_max) // 2
-            corners.append([center_x, center_y])
-
-    st.write(corners)
-
-    # Ensure exactly four corners are detected
-    if len(corners) == 3:
-        corners = calculate_missed_coord_corner(corners)
-
-    if len(corners) == 4:
-        corners = np.array(corners, dtype='float32')
-        cropped = four_point_transform(image, corners)
-        return cropped  # Return the processed image
-    else:
-        st.error("Did not detect exactly four corners.")
-        return None
-
-# # For taking the further corner points of each corner bounding box
-# def detect_id_card(image, model, device):
-#     """Detects the ID card using YOLO and extracts precise center points of bounding boxes."""
-#     image_tensor = corner_preprocess_image(image, device)
-#     results = model(image_tensor)
-
-#     # Initialize variables for the four corners
-#     top_left = None
-#     top_right = None
-#     bottom_right = None
-#     bottom_left = None
-
-#     for result in results:
-#         for box in result.boxes.xyxy:
-#             x_min, y_min, x_max, y_max = map(int, box)  # Get bounding box coordinates
-
-#             # Determine which corner this bounding box belongs to
-#             if top_left is None or (x_min + y_min) < sum(top_left):
-#                 top_left = [x_min, y_min]  # Take top-left point
-
-#             if top_right is None or (x_max - y_min) > (top_right[0] - top_right[1]):
-#                 top_right = [x_max, y_min]  # Take top-right point
-
-#             if bottom_right is None or (x_max + y_max) > sum(bottom_right):
-#                 bottom_right = [x_max, y_max]  # Take bottom-right point
-
-#             if bottom_left is None or (x_min - y_max) < (bottom_left[0] - bottom_left[1]):
-#                 bottom_left = [x_min, y_max]  # Take bottom-left point
-#     # Check if 3 corners were detected
-#     if len([c for c in [top_left, top_right, bottom_right, bottom_left] if c is not None]) == 3:
-#         # Calculate the missing corner
-#         corners = calculate_missed_coord_corner([c for c in [top_left, top_right, bottom_right, bottom_left] if c is not None])
-#         top_left, top_right, bottom_right, bottom_left = corners
-
-#     # Ensure all four corners were detected
-#     if None not in (top_left, top_right, bottom_right, bottom_left):
-#         corners = np.array([top_left, top_right, bottom_right, bottom_left], dtype="float32")
-
-#         return four_point_transform(image, corners)
-#     else:
-#         st.error("Did not detect exactly four corners.")
-#         return None
-
-
-def sharpen_image(image):
-    """Sharpen the image using an unsharp mask."""
-    gaussian_blurred = cv2.GaussianBlur(
-        image, (0, 0), 3)  # Apply Gaussian blur
-    sharpened = cv2.addWeighted(
-        image, 1.5, gaussian_blurred, -0.5, 0)  # Add weighted mask
-    return sharpened
-
 
 def draw_yolo(results, image):
     for result in results:
@@ -707,74 +536,226 @@ def load_model_select(model="yolo", image=None):
         info = GetInformation(res)
     return info, vis_image
 
+def calculate_missed_coord_corner(corners):
+    """Calculates the missing fourth corner based on the other three detected corners."""
+    if len(corners) != 3:
+        return corners  # Return as is if the length is not 3
+
+    # Convert list to NumPy array for easier manipulation
+    corners = np.array(corners, dtype='float32')
+
+    # Calculate the centroid of the three given points
+    centroid = np.mean(corners, axis=0)
+
+    # Find the vector from the centroid to each point
+    vectors = corners - centroid
+
+    # The missing point should complete the parallelogram, so we assume it lies opposite
+    # to the centroid with respect to the sum of the vectors.
+    missing_corner = centroid - np.sum(vectors, axis=0)
+
+    # Append the calculated corner to the list
+    corners = np.vstack([corners, missing_corner])
+    return corners.tolist()
+
+
+def order_points(pts):
+    """Orders points in order: (bottom-left, bottom-right, top-left, top-right)."""
+    rect = np.zeros((4, 2), dtype='float32')
+    
+    # Find top-left and bottom-right using sum coordinates
+    s = pts.sum(axis=1)
+    temp_tl = pts[np.argmin(s)]  # Temporary top-left
+    temp_br = pts[np.argmax(s)]  # Temporary bottom-right
+    
+    # Find top-right and bottom-left using difference of coordinates
+    diff = np.diff(pts, axis=1)
+    temp_tr = pts[np.argmin(diff)]  # Temporary top-right
+    temp_bl = pts[np.argmax(diff)]  # Temporary bottom-left
+    
+    # Reorder to match [bottom_left, bottom_right, top_left, top_right]
+    rect[0] = temp_bl  # bottom-left
+    rect[1] = temp_br  # bottom-right
+    rect[2] = temp_tl  # top-left
+    rect[3] = temp_tr  # top-right
+    
+    return rect
+
+def four_point_transform(image, pts):
+    """Applies a perspective transform to get a top-down view of the ID."""
+    rect = order_points(pts)
+    (bl, br, tl, tr) = rect  # Now in correct order
+
+    # Compute vertical vector from bottom midpoint to top midpoint
+    vertical_vector = (br + bl) / 2 - (tr + tl) / 2  # Vertical direction
+    vertical_vector /= np.linalg.norm(vertical_vector)  # Normalize
+
+    rect_extended = np.array([bl, br, tl, tr], dtype='float32')
+
+    # Compute new dimensions
+    widthA = np.linalg.norm(br - bl)  # Bottom width
+    widthB = np.linalg.norm(tr - tl)  # Top width
+    maxWidth = int(max(widthA, widthB))
+    
+    heightA = np.linalg.norm(tr - br)  # Right height
+    heightB = np.linalg.norm(tl - bl)  # Left height
+    maxHeight = int(max(heightA, heightB))
+    
+    # Define destination points to match our point order
+    dst = np.array([
+        [0, maxHeight - 1],           # bottom-left
+        [maxWidth - 1, maxHeight - 1], # bottom-right
+        [0, 0],                       # top-left
+        [maxWidth - 1, 0]             # top-right
+    ], dtype='float32')
+
+    # Compute perspective transform and apply it
+    M = cv2.getPerspectiveTransform(rect_extended, dst)
+    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight), flags=cv2.INTER_LINEAR)
+
+    return warped
+
+def check_qr_position(image):
+    """Check which quadrant contains the QR code and return required rotation"""
+    height, width = image.shape[:2]
+    mid_h, mid_w = height // 2, width // 2
+    
+    # Split image into quadrants
+    top_left = image[0:mid_h, 0:mid_w]
+    top_right = image[0:mid_h, mid_w:width]
+    bottom_left = image[mid_h:height, 0:mid_w]
+    bottom_right = image[mid_h:height, mid_w:width]
+    
+    # Initialize QR code reader
+    qreader = QReader()
+    
+    # Check each quadrant for QR code
+    quadrants = {
+        'top_left': top_left,
+        'top_right': top_right,
+        'bottom_left': bottom_left,
+        'bottom_right': bottom_right
+    }
+    
+    qr_location = None
+    for position, quad in quadrants.items():
+        qr = qreader.detect_and_decode(quad)
+        if qr is not None and len(qr) > 0:
+            qr_location = position
+            break
+            
+    # Determine rotation based on QR location
+    if qr_location == 'top_right':
+        return image, 0  # Correct orientation
+    elif qr_location == 'bottom_left':
+        return cv2.rotate(image, cv2.ROTATE_180), 180  # Rotate 180 degrees
+    elif qr_location == 'bottom_right':
+        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE), 90  # Rotate left
+    elif qr_location == 'top_left':
+        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE), -90  # Rotate right
+    
+    return image, 0  # Return original image if no QR code found
+
+def detect_id_card(image, model, device, expand_ratio=0.1):
+    """Detects the ID card using YOLO, expands bounding box corners, crops, and corrects orientation."""
+    image_tensor = corner_preprocess_image(image, device)
+    results = model(image_tensor)    
+    
+    # Initialize list to store detected corner points
+    corners = []
+    for result in results:
+        for box in result.boxes.xyxy:
+            # Get bounding box coordinates
+            x_min, y_min, x_max, y_max = map(int, box)
+            center_x = (x_min + x_max) // 2
+            center_y = (y_min + y_max) // 2
+            corners.append([center_x, center_y])
+
+    # st.write(len(corners))
+    
+    if len(corners) <= 2:
+        return image
+    
+    # Ensure exactly four corners are detected
+    if len(corners) == 3:
+        corners = calculate_missed_coord_corner(corners)
+
+    if len(corners) == 4:
+        corners = np.array(corners, dtype="float32")
+        
+        # # Print original corners before ordering
+        # st.write("Original corners:")
+        # for i, corner in enumerate(corners):
+        #     st.write(f"Corner {i}: {corner}")
+
+        # Order corners and print their positions
+        ordered_corners = order_points(corners)
+        corner_names = ["Bottom-Left", "Bottom-Right", "Top-Left", "Top-Right"]
+        # st.write("\nOrdered corners:")
+        # for name, corner in zip(corner_names, ordered_corners):
+        #     st.write(f"{name}: {corner}")
+
+        # Expand the bounding box corners slightly outward
+        center_x, center_y = np.mean(ordered_corners, axis=0)
+        for i in range(4):
+            direction = ordered_corners[i] - [center_x, center_y]  # Vector from center
+            ordered_corners[i] += direction * expand_ratio  # Expand outward
+
+        cropped_id = four_point_transform(image, ordered_corners)
+        
+        # Check QR code position and rotate if necessary
+        final_id, rotation_angle = check_qr_position(cropped_id)
+        # if rotation_angle != 0:
+        #     st.write(f"Image rotated by {rotation_angle} degrees based on QR code position")
+        
+        return final_id
+    else:
+        st.error("Did not detect exactly four corners.")
+        return None
+
+
+def sharpen_image(image):
+    """Sharpen the image using an unsharp mask."""
+    gaussian_blurred = cv2.GaussianBlur(
+        image, (0, 0), 3)  # Apply Gaussian blur
+    sharpened = cv2.addWeighted(
+        image, 1.5, gaussian_blurred, -0.5, 0)  # Add weighted mask
+    return sharpened
+
 
 def process_image(image, select_model="yolo"):
     """Process the image using PaddleOCR and VietOCR"""
-    if paddle_model is None or vietocr_model is None:
-        st.error("Models not loaded correctly")
+    if paddle_model is None:
+        st.error("PaddleOCR model not loaded correctly")
+        return None
+    if vietocr_model is None:
+        st.error("VietOCR model not loaded correctly")
         return None
 
     # Ensure YOLO model is loaded
     yolo_model = load_yolo_model()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    corner_cropped_image = detect_id_card(image, yolo_model, device)
+    # Get cropped and rotated image
+    processed_image = detect_id_card(image, yolo_model, device)
 
-    height, width, channels = corner_cropped_image.shape
-
-    print(f"Image dimensions: {width}x{height} pixels")
-    if corner_cropped_image is None:
-        image = sharpen_image(image)
-        info, vis_image = load_model_select(select_model, image)
-        # return None
+    if processed_image is None:
+        processed_image = sharpen_image(image)
     else:
-        height, width, channels = corner_cropped_image.shape
-        print(f"Original dimensions: {width}x{height} pixels")
-
-        # Calculate new dimensions (1.5x larger)
+        # Resize the processed image
+        height, width = processed_image.shape[:2]
         new_width = int(width * 2)
         new_height = int(height * 2)
+        processed_image = cv2.resize(processed_image, (new_width, new_height),
+                                   interpolation=cv2.INTER_LINEAR)
+        processed_image = sharpen_image(processed_image)
 
-        # Resize the image
-        corner_cropped_image = cv2.resize(corner_cropped_image, (new_width, new_height),
-                                          interpolation=cv2.INTER_LINEAR)
+    # Get text detection and recognition results
+    info, detected_regions = load_model_select(select_model, processed_image)
 
-        height, width, channels = corner_cropped_image.shape
-        print(f"New dimensions: {width}x{height} pixels")
-        corner_cropped_image = sharpen_image(corner_cropped_image)
-        info, vis_image = load_model_select(select_model, corner_cropped_image)
-    # if not result or len(result) == 0 or result[0] is None:
-    #     st.warning("No text detected in the image")
-    #     return None
-    # boxes = []
-    # print("result", result[0])
-    # for line in result[0]:
-    #     boxes.append([[int(line[0][0]), int(line[0][1])],
-    #                   [int(line[2][0]), int(line[2][1])]])
-    # boxes = apply_nms(boxes, nms_thresh=0.7)
-    # boxes = boxes[::-1]
-    # print("box", len(boxes))
-    # extracted_texts = []
-    # for idx, box in enumerate(boxes):
-    #     cropped_image = image[box[0][1]:box[1][1], box[0][0]:box[1][0]]
-    #     try:
-    #         pil_image = Image.fromarray(
-    #             cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
-    #         text = vietocr_model.predict(pil_image)
-    #         print("text", text)
-    #         if text and len(text.strip()) > 0 and len(text) >= 2:
-    #             extracted_texts.append(text)
-    #     except Exception as e:
-    #         st.warning(f"Error recognizing text in region {idx}: {e}")
-
-    # txt = GetInformation(extracted_texts)
-    # print(txt)
-    # structured_info = extract_field_info(extracted_texts)
-
-    # vis_image = draw_ocr(corner_cropped_image, result[0], txts=None, scores=None)
     return {
-        "visualization": vis_image,
-        "croppedImage": corner_cropped_image,
+        "processed_image": processed_image,  # Clean cropped and rotated image
+        "detected_regions": detected_regions,  # Image with bounding boxes
         "texts": "",
         "structured_info": info
     }
@@ -810,44 +791,46 @@ if uploaded_file is not None:
             if result:
 
                 with col2:
-                    # Display processed image
+                    # Display processed image (cropped and rotated)
                     st.subheader("Processed Image")
                     st.image(cv2.cvtColor(
-                        result["croppedImage"], cv2.COLOR_BGR2RGB), use_container_width=True)
-                    with col3:
-                        st.subheader("Detected Regions")
-                        st.image(cv2.cvtColor(
-                            result["visualization"], cv2.COLOR_BGR2RGB), use_container_width=True)
+                        result["processed_image"], cv2.COLOR_BGR2RGB), use_container_width=True)
+                
+                with col3:
+                    # Display image with detected regions
+                    st.subheader("Detected Regions")
+                    st.image(cv2.cvtColor(
+                        result["detected_regions"], cv2.COLOR_BGR2RGB), use_container_width=True)
 
-                    # Display extracted information
-                    st.subheader("Extracted Information")
+                # Display extracted information
+                st.subheader("Extracted Information")
 
-                    # Display structured information in a table
-                    for field, value in result["structured_info"].items():
-                        if value:
-                            st.info(f"**{field}**: {value}")
-                        else:
-                            st.warning(f"**{field}**: Not detected")
+                # Display structured information in a table
+                for field, value in result["structured_info"].items():
+                    if value:
+                        st.info(f"**{field}**: {value}")
+                    else:
+                        st.warning(f"**{field}**: Not detected")
 
-                    # # Show all detected text
-                    # with st.expander("All Detected Text"):
-                    #     for idx, text in enumerate(result["texts"]):
-                    #         st.write(f"{idx + 1}. {text}")
+                # # Show all detected text
+                # with st.expander("All Detected Text"):
+                #     for idx, text in enumerate(result["texts"]):
+                #         st.write(f"{idx + 1}. {text}")
 
-                    # Option to download results as CSV
-                    import pandas as pd
-                    import io
+                # Option to download results as CSV
+                import pandas as pd
+                import io
 
-                    df = pd.DataFrame([result["structured_info"]])
-                    csv = df.to_csv(index=False).encode('utf-8')
+                df = pd.DataFrame([result["structured_info"]])
+                csv = df.to_csv(index=False).encode('utf-8')
 
-                    st.download_button(
-                        "Download Results as CSV",
-                        csv,
-                        "id_card_results.csv",
-                        "text/csv",
-                        key='download-csv'
-                    )
+                st.download_button(
+                    "Download Results as CSV",
+                    csv,
+                    "id_card_results.csv",
+                    "text/csv",
+                    key='download-csv'
+                )
 else:
     st.info("Please upload an image to begin processing")
 
