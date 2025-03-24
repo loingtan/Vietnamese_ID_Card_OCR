@@ -891,14 +891,25 @@ def correct_text(text, vietnamese_words):
 
 
 def corner_preprocess_image(image, device):
-    """Automatically adjusts tensor shape for YOLO model input."""
+    """Resizes an image to fit within 640x640 while maintaining aspect ratio, then pads it."""
     h, w, _ = image.shape
-    size = max(h, w)
-    padded_image = np.zeros((size, size, 3), dtype=np.uint8)
-    padded_image[:h, :w, :] = image
-    image_resized = cv2.resize(padded_image, (640, 640))
-    image_tensor = torch.from_numpy(image_resized).permute(
-        2, 0, 1).float().div(255.0).unsqueeze(0).to(device)
+    scale = 640 / max(h, w)  # Scale factor to fit within 640x640
+    new_w, new_h = int(w * scale), int(h * scale)
+    
+    # Resize while keeping aspect ratio
+    image_resized = cv2.resize(image, (new_w, new_h))
+
+    # Create a blank 640x640 canvas (black padding)
+    padded_image = np.zeros((640, 640, 3), dtype=np.uint8)
+    
+    # Center the resized image
+    start_x = (640 - new_w) // 2
+    start_y = (640 - new_h) // 2
+    padded_image[start_y:start_y + new_h, start_x:start_x + new_w] = image_resized
+
+    # Convert to PyTorch tensor
+    image_tensor = torch.from_numpy(padded_image).permute(2, 0, 1).float().div(255.0).unsqueeze(0).to(device)
+
     return image_tensor
 
 
@@ -1000,27 +1011,97 @@ def load_model_select(image=None):
     return info1, vis_image1, vis_image2
 
 
-def calculate_missed_coord_corner(corners):
-    """Calculates the missing fourth corner based on the other three detected corners."""
-    if len(corners) != 3:
-        return corners  # Return as is if the length is not 3
+def order_points(pts):
+    """Orders points clockwise starting from top-left: (top-left, top-right, bottom-right, bottom-left)."""
+    rect = np.zeros((4, 2), dtype='float32')
 
-    # Convert list to NumPy array for easier manipulation
+    # Sort by y-coordinate to get top and bottom points
+    sorted_y = pts[pts[:, 1].argsort()]
+    top_points = sorted_y[:2]  # Two points with smallest y values
+    bottom_points = sorted_y[2:]  # Two points with largest y values
+
+    # Sort top points by x-coordinate
+    top_points = top_points[top_points[:, 0].argsort()]
+    top_left, top_right = top_points
+
+    # Sort bottom points by x-coordinate
+    bottom_points = bottom_points[bottom_points[:, 0].argsort()]
+    bottom_left, bottom_right = bottom_points
+
+    # Arrange in clockwise order starting from top-left
+    rect[0] = top_left     # top-left
+    rect[1] = top_right    # top-right
+    rect[2] = bottom_right # bottom-right
+    rect[3] = bottom_left  # bottom-left
+
+    return rect
+
+def calculate_missed_coord_corner(corners):
+    """Calculates the missing fourth corner based on three corners.
+    Returns corners in clockwise order starting from top-left."""
+    if len(corners) != 3:
+        return corners
+
+    # Convert to numpy array
     corners = np.array(corners, dtype='float32')
 
-    # Calculate the centroid of the three given points
-    centroid = np.mean(corners, axis=0)
+    # Sort by y-coordinate
+    sorted_y = corners[corners[:, 1].argsort()]
+    
+    # Get top points (smallest y values)
+    top_points_mask = corners[:, 1] <= np.median(corners[:, 1])
+    top_points = corners[top_points_mask]
+    other_point = corners[~top_points_mask][0]
 
-    # Find the vector from the centroid to each point
-    vectors = corners - centroid
+    if len(top_points) == 2:
+        # We have two top points, need to calculate bottom point
+        # Sort top points by x
+        top_points = top_points[top_points[:, 0].argsort()]
+        top_left, top_right = top_points
+        
+        # Vector from top-left to top-right
+        top_vector = top_right - top_left
+        
+        # Other point is bottom-left or bottom-right
+        if other_point[0] < np.mean([top_left[0], top_right[0]]):
+            # Other point is bottom-left, calculate bottom-right
+            bottom_left = other_point
+            bottom_right = bottom_left + top_vector
+        else:
+            # Other point is bottom-right, calculate bottom-left
+            bottom_right = other_point
+            bottom_left = bottom_right - top_vector
+            
+    else:
+        # We have one top point and two bottom points
+        top_point = top_points[0]
+        bottom_points = corners[~top_points_mask]
+        
+        # Sort bottom points by x
+        bottom_points = bottom_points[bottom_points[:, 0].argsort()]
+        bottom_left, bottom_right = bottom_points
+        
+        # Determine if top point is top-left or top-right
+        if top_point[0] < np.mean([bottom_left[0], bottom_right[0]]):
+            # Top point is top-left, calculate top-right
+            top_left = top_point
+            bottom_vector = bottom_right - bottom_left
+            top_right = top_left + bottom_vector
+        else:
+            # Top point is top-right, calculate top-left
+            top_right = top_point
+            bottom_vector = bottom_right - bottom_left
+            top_left = top_right - bottom_vector
 
-    # The missing point should complete the parallelogram, so we assume it lies opposite
-    # to the centroid with respect to the sum of the vectors.
-    missing_corner = centroid - np.sum(vectors, axis=0)
+    # Return corners in clockwise order starting from top-left
+    ordered_corners = np.array([
+        top_left,     # top-left
+        top_right,    # top-right
+        bottom_right, # bottom-right
+        bottom_left   # bottom-left
+    ])
 
-    # Append the calculated corner to the list
-    corners = np.vstack([corners, missing_corner])
-    return corners.tolist()
+    return ordered_corners.tolist()
 
 
 def order_points(pts):
@@ -1049,6 +1130,7 @@ def order_points(pts):
 def four_point_transform(image, pts):
     """Applies a perspective transform to get a top-down view of the ID."""
     rect = order_points(pts)
+    # st.write("Ordered points:", rect)
     (bl, br, tl, tr) = rect  # Now in correct order
 
     # Compute vertical vector from bottom midpoint to top midpoint
@@ -1074,10 +1156,25 @@ def four_point_transform(image, pts):
         [maxWidth - 1, 0]             # top-right
     ], dtype='float32')
 
+    # # Debug prints
+    # st.write("Input image shape:", image.shape)
+    # st.write("Rect extended:", rect_extended)
+    # st.write("Destination points:", dst)
+    # st.write("Max dimensions:", maxWidth, maxHeight)
+
     # Compute perspective transform and apply it
     M = cv2.getPerspectiveTransform(rect_extended, dst)
     warped = cv2.warpPerspective(
         image, M, (maxWidth, maxHeight), flags=cv2.INTER_LINEAR)
+
+    # # Debug prints for warped image
+    # st.write("Warped image shape:", warped.shape)
+    # if warped.size == 0:
+    #     st.error("Warning: Warped image is empty!")
+    # elif np.all(warped == 0):
+    #     st.error("Warning: Warped image is all black!")
+    # else:
+    #     st.write("Warped image min/max values:", np.min(warped), np.max(warped))
 
     return warped
 
@@ -1147,9 +1244,17 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
 
     # Ensure exactly four corners are detected
     if len(corners) == 3:
-        corners = calculate_missed_coord_corner(corners)
+        # st.write("Original 3 corners:", corners)
+        new_corners = calculate_missed_coord_corner(corners)
+        if len(new_corners) == 4:
+            corners = new_corners
+            # st.write("Updated to 4 corners:", corners)
+        else:
+            st.error(f"Failed to calculate fourth corner. Got {len(new_corners)} corners instead")
+            return image
 
     if len(corners) == 4:
+        # st.write("Original 4 corners:", corners)
         corners = np.array(corners, dtype="float32")
 
         # # Print original corners before ordering
@@ -1159,7 +1264,7 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
 
         # Order corners and print their positions
         ordered_corners = order_points(corners)
-        corner_names = ["Bottom-Left", "Bottom-Right", "Top-Left", "Top-Right"]
+        # corner_names = ["Bottom-Left", "Bottom-Right", "Top-Left", "Top-Right"]
         # st.write("\nOrdered corners:")
         # for name, corner in zip(corner_names, ordered_corners):
         #     st.write(f"{name}: {corner}")
@@ -1172,12 +1277,12 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
             ordered_corners[i] += direction * expand_ratio  # Expand outward
 
         cropped_id = four_point_transform(image, ordered_corners)
+        return cropped_id
 
         # Check QR code position and rotate if necessary
         final_id, rotation_angle = check_qr_position(cropped_id)
         # if rotation_angle != 0:
         #     st.write(f"Image rotated by {rotation_angle} degrees based on QR code position")
-
         return final_id
     else:
         st.error("Did not detect exactly four corners.")
