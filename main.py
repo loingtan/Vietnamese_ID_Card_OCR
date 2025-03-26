@@ -62,7 +62,7 @@ st.set_page_config(
 )
 
 st.title("Vietnamese ID Card Scanner")
-st.write("Upload an image of a Vietnamese ID card for OCR processing")
+st.write("Upload an image of a Vietnamese ID card for OCR processing.")
 
 
 @st.cache_resource
@@ -121,7 +121,7 @@ def load_yolo_model():
     """Load YOLO model for ID card detection"""
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = YOLO("best.pt")  # Load custom trained model
+        model = YOLO("corner_detection_model/weight/25_03_25-YOLOv11n-Corner.pt")  # Load custom trained model
         model.to(device)
         return model
     except Exception as e:
@@ -891,7 +891,8 @@ def correct_text(text, vietnamese_words):
 
 
 def corner_preprocess_image(image, device):
-    """Resizes an image to fit within 640x640 while maintaining aspect ratio, then pads it."""
+    """Resizes an image to fit within 640x640 while maintaining aspect ratio, then pads it.
+    Returns the preprocessed image tensor and scaling factors."""
     h, w, _ = image.shape
     scale = 640 / max(h, w)  # Scale factor to fit within 640x640
     new_w, new_h = int(w * scale), int(h * scale)
@@ -910,7 +911,7 @@ def corner_preprocess_image(image, device):
     # Convert to PyTorch tensor
     image_tensor = torch.from_numpy(padded_image).permute(2, 0, 1).float().div(255.0).unsqueeze(0).to(device)
 
-    return image_tensor
+    return image_tensor, scale, (start_x, start_y)
 
 
 # def apply_nms(boxes, scores, nms_thresh=0.5):
@@ -984,6 +985,15 @@ def draw_yolo(results1, results2, image):
     return image, res
 
 
+def sharpen_image(image):
+    """Sharpen the image using an unsharp mask."""
+    gaussian_blurred = cv2.GaussianBlur(
+        image, (0, 0), 3)  # Apply Gaussian blur
+    sharpened = cv2.addWeighted(
+        image, 1.5, gaussian_blurred, -0.5, 0)  # Add weighted mask
+    return sharpened
+
+
 def load_model_select(image=None):
     image1 = image.copy()
     image2 = image.copy()
@@ -1011,30 +1021,74 @@ def load_model_select(image=None):
     return info1, vis_image1, vis_image2
 
 
-def order_points(pts):
-    """Orders points clockwise starting from top-left: (top-left, top-right, bottom-right, bottom-left)."""
-    rect = np.zeros((4, 2), dtype='float32')
+# def order_points(pts):
+#     """Orders points clockwise starting from top-left: (top-left, top-right, bottom-right, bottom-left)."""
+#     rect = np.zeros((4, 2), dtype='float32')
 
-    # Sort by y-coordinate to get top and bottom points
-    sorted_y = pts[pts[:, 1].argsort()]
-    top_points = sorted_y[:2]  # Two points with smallest y values
-    bottom_points = sorted_y[2:]  # Two points with largest y values
+#     # Sort by y-coordinate to get top and bottom points
+#     sorted_y = pts[pts[:, 1].argsort()]
+#     top_points = sorted_y[:2]  # Two points with smallest y values
+#     bottom_points = sorted_y[2:]  # Two points with largest y values
 
-    # Sort top points by x-coordinate
-    top_points = top_points[top_points[:, 0].argsort()]
-    top_left, top_right = top_points
+#     # Sort top points by x-coordinate
+#     top_points = top_points[top_points[:, 0].argsort()]
+#     top_left, top_right = top_points
 
-    # Sort bottom points by x-coordinate
-    bottom_points = bottom_points[bottom_points[:, 0].argsort()]
-    bottom_left, bottom_right = bottom_points
+#     # Sort bottom points by x-coordinate
+#     bottom_points = bottom_points[bottom_points[:, 0].argsort()]
+#     bottom_left, bottom_right = bottom_points
 
-    # Arrange in clockwise order starting from top-left
-    rect[0] = top_left     # top-left
-    rect[1] = top_right    # top-right
-    rect[2] = bottom_right # bottom-right
-    rect[3] = bottom_left  # bottom-left
+#     # Arrange in clockwise order starting from top-left
+#     rect[0] = top_left     # top-left
+#     rect[1] = top_right    # top-right
+#     rect[2] = bottom_right # bottom-right
+#     rect[3] = bottom_left  # bottom-left
 
-    return rect
+#     return rect
+
+
+def check_qr_position(image):
+    """Check which quadrant contains the QR code and return required rotation degree and the rotated image
+        Need to 4 corner image first"""
+    height, width = image.shape[:2]
+    mid_h, mid_w = height // 2, width // 2
+
+    # Split image into quadrants
+    top_left = image[0:mid_h, 0:mid_w]
+    top_right = image[0:mid_h, mid_w:width]
+    bottom_left = image[mid_h:height, 0:mid_w]
+    bottom_right = image[mid_h:height, mid_w:width]
+
+    # Initialize QR code reader
+    qreader = QReader()
+
+    # Check each quadrant for QR code
+    quadrants = {
+        'top_left': top_left,
+        'top_right': top_right,
+        'bottom_left': bottom_left,
+        'bottom_right': bottom_right
+    }
+
+    qr_location = None
+    for position, quad in quadrants.items():
+        qr = qreader.detect_and_decode(quad)
+        if qr is not None and len(qr) > 0:
+            qr_location = position
+            break
+
+    # Determine rotation based on QR location
+    if qr_location == 'top_right':
+        return image, 0  # Correct orientation
+    elif qr_location == 'bottom_left':
+        return cv2.rotate(image, cv2.ROTATE_180), 180  # Rotate 180 degrees
+    elif qr_location == 'bottom_right': # Rotate left
+        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE), 90
+    elif qr_location == 'top_left':
+        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE), -90  # Rotate right
+
+    return image, 0  # Return original image if no QR code found
+
 
 def calculate_missed_coord_corner(corners):
     """Calculates the missing fourth corner based on three corners.
@@ -1051,7 +1105,7 @@ def calculate_missed_coord_corner(corners):
     # Get top points (smallest y values)
     top_points_mask = corners[:, 1] <= np.median(corners[:, 1])
     top_points = corners[top_points_mask]
-    other_point = corners[~top_points_mask][0]
+    other_points = corners[~top_points_mask]
 
     if len(top_points) == 2:
         # We have two top points, need to calculate bottom point
@@ -1063,31 +1117,37 @@ def calculate_missed_coord_corner(corners):
         top_vector = top_right - top_left
         
         # Other point is bottom-left or bottom-right
-        if other_point[0] < np.mean([top_left[0], top_right[0]]):
+        bottom_point = other_points[0]
+        if bottom_point[0] < np.mean([top_left[0], top_right[0]]):
+            st.write("Bottom point is bottom-left")
             # Other point is bottom-left, calculate bottom-right
-            bottom_left = other_point
+            bottom_left = bottom_point
             bottom_right = bottom_left + top_vector
         else:
+            st.write("Bottom point is bottom-right")    
             # Other point is bottom-right, calculate bottom-left
-            bottom_right = other_point
+            bottom_right = bottom_point
             bottom_left = bottom_right - top_vector
             
     else:
         # We have one top point and two bottom points
         top_point = top_points[0]
-        bottom_points = corners[~top_points_mask]
+        bottom_points = other_points[bottom_points[:, 0].argsort()]
         
-        # Sort bottom points by x
-        bottom_points = bottom_points[bottom_points[:, 0].argsort()]
+        if len(bottom_points) < 2:
+            return corners.tolist()  # Return original corners if we don't have enough points
+            
         bottom_left, bottom_right = bottom_points
         
         # Determine if top point is top-left or top-right
         if top_point[0] < np.mean([bottom_left[0], bottom_right[0]]):
             # Top point is top-left, calculate top-right
+            st.write("Top point is top-left")
             top_left = top_point
             bottom_vector = bottom_right - bottom_left
             top_right = top_left + bottom_vector
         else:
+            st.write("Top point is top-right")
             # Top point is top-right, calculate top-left
             top_right = top_point
             bottom_vector = bottom_right - bottom_left
@@ -1100,7 +1160,7 @@ def calculate_missed_coord_corner(corners):
         bottom_right, # bottom-right
         bottom_left   # bottom-left
     ])
-
+    
     return ordered_corners.tolist()
 
 
@@ -1150,10 +1210,10 @@ def four_point_transform(image, pts):
 
     # Define destination points to match our point order
     dst = np.array([
-        [0, maxHeight - 1],           # bottom-left
+        [0, maxHeight - 1],             # bottom-left
         [maxWidth - 1, maxHeight - 1],  # bottom-right
-        [0, 0],                       # top-left
-        [maxWidth - 1, 0]             # top-right
+        [0, 0],                         # top-left
+        [maxWidth - 1, 0]               # top-right
     ], dtype='float32')
 
     # # Debug prints
@@ -1179,52 +1239,10 @@ def four_point_transform(image, pts):
     return warped
 
 
-def check_qr_position(image):
-    """Check which quadrant contains the QR code and return required rotation"""
-    height, width = image.shape[:2]
-    mid_h, mid_w = height // 2, width // 2
-
-    # Split image into quadrants
-    top_left = image[0:mid_h, 0:mid_w]
-    top_right = image[0:mid_h, mid_w:width]
-    bottom_left = image[mid_h:height, 0:mid_w]
-    bottom_right = image[mid_h:height, mid_w:width]
-
-    # Initialize QR code reader
-    qreader = QReader()
-
-    # Check each quadrant for QR code
-    quadrants = {
-        'top_left': top_left,
-        'top_right': top_right,
-        'bottom_left': bottom_left,
-        'bottom_right': bottom_right
-    }
-
-    qr_location = None
-    for position, quad in quadrants.items():
-        qr = qreader.detect_and_decode(quad)
-        if qr is not None and len(qr) > 0:
-            qr_location = position
-            break
-
-    # Determine rotation based on QR location
-    if qr_location == 'top_right':
-        return image, 0  # Correct orientation
-    elif qr_location == 'bottom_left':
-        return cv2.rotate(image, cv2.ROTATE_180), 180  # Rotate 180 degrees
-    elif qr_location == 'bottom_right':
-        # Rotate left
-        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE), 90
-    elif qr_location == 'top_left':
-        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE), -90  # Rotate right
-
-    return image, 0  # Return original image if no QR code found
-
-
 def detect_id_card(image, model, device, expand_ratio=0.1):
     """Detects the ID card using YOLO, expands bounding box corners, crops, and corrects orientation."""
-    image_tensor = corner_preprocess_image(image, device)
+    # Get preprocessed image and scaling info
+    image_tensor, scale, (pad_x, pad_y) = corner_preprocess_image(image, device)
     results = model(image_tensor)
 
     # Initialize list to store detected corner points
@@ -1233,70 +1251,141 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
         for box in result.boxes.xyxy:
             # Get bounding box coordinates
             x_min, y_min, x_max, y_max = map(int, box)
+            
+            # Calculate center point
             center_x = (x_min + x_max) // 2
             center_y = (y_min + y_max) // 2
-            corners.append([center_x, center_y])
+            
+            # Convert from padded coordinates back to original image coordinates
+            orig_x = (center_x - pad_x) / scale
+            orig_y = (center_y - pad_y) / scale
+            
+            corners.append([int(orig_x), int(orig_y)])
 
-    # st.write(len(corners))
-
+    st.write("Detected corners:", corners)
     if len(corners) <= 2:
-        return image
+        # Try all possible rotations (90, 180, 270 degrees)
+        max_corners = corners
+        best_image = image
+        rotations = [
+            (cv2.ROTATE_90_CLOCKWISE, 90),
+            (cv2.ROTATE_180, 180),
+            (cv2.ROTATE_90_COUNTERCLOCKWISE, 270)
+        ]
 
-    # Ensure exactly four corners are detected
+        for rotation_code, angle in rotations:
+            # Rotate image
+            rotated_image = cv2.rotate(image, rotation_code)
+            rotated_tensor, scale, (pad_x, pad_y) = corner_preprocess_image(rotated_image, device)
+            rotated_results = model(rotated_tensor)
+            
+            # Detect corners in rotated image
+            rotated_corners = []
+            for result in rotated_results:
+                for box in result.boxes.xyxy:
+                    x_min, y_min, x_max, y_max = map(int, box)
+                    center_x = (x_min + x_max) // 2
+                    center_y = (y_min + y_max) // 2
+                    orig_x = (center_x - pad_x) / scale
+                    orig_y = (center_y - pad_y) / scale
+                    rotated_corners.append([int(orig_x), int(orig_y)])
+            
+            if len(rotated_corners) > len(max_corners):
+                st.write(f"Found {len(rotated_corners)} corners after {angle}° rotation")
+                max_corners = rotated_corners
+                best_image = rotated_image
+
+        # Use the rotation that gave us the most corners
+        if len(max_corners) > len(corners):
+            corners = max_corners
+            image = best_image
+            st.image(image, caption=f"Rotated image with {len(corners)} corners")
+        
+        # If we still don't have enough corners, return the original image
+        if len(corners) <= 2:
+            st.warning("Could not detect enough corners in any orientation")
+            return image
+
     if len(corners) == 3:
-        # st.write("Original 3 corners:", corners)
+        st.write("Found 3 corners at positions:", corners)
         new_corners = calculate_missed_coord_corner(corners)
         if len(new_corners) == 4:
             corners = new_corners
-            # st.write("Updated to 4 corners:", corners)
+            st.write("Calculated 4th corner. New corners:", corners)
         else:
-            st.error(f"Failed to calculate fourth corner. Got {len(new_corners)} corners instead")
+            st.error(f"Failed to calculate fourth corner. Got {len(new_corners)} corners.")
+            st.write("Corner positions:", new_corners)
             return image
 
-    if len(corners) == 4:
-        # st.write("Original 4 corners:", corners)
+    if len(corners) >= 4:
         corners = np.array(corners, dtype="float32")
+        
+        if len(corners) > 4:
+            # Find the best 4 corners that form the largest rectangle
+            max_area = 0
+            best_corners = None
+            
+            from itertools import combinations
+            for four_corners in combinations(corners, 4):
+                four_corners = np.array(four_corners)
+                ordered = order_points(four_corners)
+                
+                # Calculate area using the ordered points
+                (bl, br, tl, tr) = ordered
+                width1 = np.linalg.norm(tr - tl)   # Top width
+                width2 = np.linalg.norm(br - bl)   # Bottom width
+                height1 = np.linalg.norm(tr - br)  # Right height
+                height2 = np.linalg.norm(tl - bl)  # Left height
+                
+                # Calculate average area
+                area = ((width1 + width2) / 2) * ((height1 + height2) / 2)
+                
+                # Keep track of largest area without angle verification
+                if area > max_area:
+                    max_area = area
+                    best_corners = ordered
 
-        # # Print original corners before ordering
-        # st.write("Original corners:")
-        # for i, corner in enumerate(corners):
-        #     st.write(f"Corner {i}: {corner}")
+            if best_corners is not None:
+                corners = best_corners
+                st.write(f"Found largest rectangle with area: {max_area}")
+            else:
+                st.error("Could not find valid corners")
+                return image
+        else:
+            corners = order_points(corners)
 
-        # Order corners and print their positions
-        ordered_corners = order_points(corners)
-        # corner_names = ["Bottom-Left", "Bottom-Right", "Top-Left", "Top-Right"]
-        # st.write("\nOrdered corners:")
-        # for name, corner in zip(corner_names, ordered_corners):
-        #     st.write(f"{name}: {corner}")
+        # Add debug visualization
+        debug_img = image.copy()
+        for i, corner in enumerate(corners):
+            cv2.circle(debug_img, (int(corner[0]), int(corner[1])), 
+                      7, (0, 0, 255), -1)
+            label = str(i)
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            cv2.putText(debug_img, label, 
+                       (int(corner[0]) - 10, int(corner[1]) - 10),
+                       font, 0.8, (255, 255, 255), 2)
 
-        # Expand the bounding box corners slightly outward
-        center_x, center_y = np.mean(ordered_corners, axis=0)
+        st.image(debug_img, caption="Detected corners (numbered 0-3)")
+        
+        # Expand corners outward
+        center_x, center_y = np.mean(corners, axis=0)
         for i in range(4):
-            direction = ordered_corners[i] - \
-                [center_x, center_y]  # Vector from center
-            ordered_corners[i] += direction * expand_ratio  # Expand outward
+            direction = corners[i] - [center_x, center_y]
+            corners[i] += direction * expand_ratio
 
-        cropped_id = four_point_transform(image, ordered_corners)
-        return cropped_id
-
+        # Apply perspective transform
+        cropped_id = four_point_transform(image, corners)
+        st.image(cropped_id, caption="Cropped and transformed ID card")
+        
         # Check QR code position and rotate if necessary
         final_id, rotation_angle = check_qr_position(cropped_id)
-        # if rotation_angle != 0:
-        #     st.write(f"Image rotated by {rotation_angle} degrees based on QR code position")
-        return final_id
-    else:
-        st.error("Did not detect exactly four corners.")
-        return None
+        if rotation_angle != 0:
+            st.write(f"Image rotated by {rotation_angle} degrees based on QR code position")
+            return final_id
+        st.image(final_id, caption="Final ID card image")
+        return cropped_id
 
-
-def sharpen_image(image):
-    """Sharpen the image using an unsharp mask."""
-    gaussian_blurred = cv2.GaussianBlur(
-        image, (0, 0), 3)  # Apply Gaussian blur
-    sharpened = cv2.addWeighted(
-        image, 1.5, gaussian_blurred, -0.5, 0)  # Add weighted mask
-    return sharpened
-
+    return image
 
 def process_image(image):
     """Process the image using PaddleOCR and VietOCR"""
@@ -1374,13 +1463,13 @@ if uploaded_file is not None:
 
                 with col3:
                     # Display image with detected regions
-                    st.subheader("detected_regions_yolo")
+                    st.subheader("Detected regions - YOLO")
                     st.image(cv2.cvtColor(
                         result["detected_regions_yolo"], cv2.COLOR_BGR2RGB), use_container_width=True)
 
                 with col4:
                     # Display image with detected regions
-                    st.subheader("detected_regions_db")
+                    st.subheader("Detected regions - DB")
                     st.image(cv2.cvtColor(
                         result["detected_regions_db"], cv2.COLOR_BGR2RGB), use_container_width=True)
                 st.subheader("Extracted Information")
@@ -1425,7 +1514,7 @@ with st.expander("Instructions"):
     5. Download results as CSV if needed
 
     ### Note:
-    - For best results, ensure the ID card image is clear and well-lit
-    - The application works with both old and new Vietnamese ID card formats
-    - Adjust the confidence threshold in the sidebar if needed
+    - For best results, ensure the ID card image is centered, well-lit and in focus
     """)
+#   - The application works with both old and new Vietnamese ID card formats
+#   - Adjust the confidence threshold in the sidebar if needed
