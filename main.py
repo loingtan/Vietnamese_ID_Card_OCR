@@ -1,3 +1,4 @@
+from mpmath import besseli
 from transformers import AutoTokenizer, AutoModelForTokenClassification
 from PIL import Image
 import streamlit as st
@@ -15,6 +16,7 @@ from langdetect import detect, LangDetectException
 from transformers import pipeline
 from Levenshtein import distance as levenshtein_distance
 from ensemble_boxes import weighted_boxes_fusion
+from itertools import combinations
 corrector = pipeline("text2text-generation",
                      model="bmd1905/vietnamese-correction-v2")
 
@@ -121,9 +123,15 @@ def load_yolo_model():
     """Load YOLO model for ID card detection"""
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = YOLO("corner_detection_model/weight/25_03_25-YOLOv11n-Corner.pt")  # Load custom trained model
-        model.to(device)
-        return model
+        # Model with less training data but more accurate per corner
+        model1 = YOLO("corner_detection_model/weight/29_03_25-YOLOv11n-Corner-best_metrics.pt")
+        model1.to(device)
+        # Model with more training data but less accurate per corner
+        model2 = YOLO("corner_detection_model/weight/29_03_25-YOLOv11n-Corner-All_files.pt")
+        model2.to(device)
+        models= [model1, model2]
+        # models = [model1]
+        return models
     except Exception as e:
         st.error(f"Error loading YOLO model: {e}")
         return None
@@ -1239,27 +1247,47 @@ def four_point_transform(image, pts):
     return warped
 
 
-def detect_id_card(image, model, device, expand_ratio=0.1):
+def detect_id_card(image, models, device, expand_ratio=0.1):
     """Detects the ID card using YOLO, expands bounding box corners, crops, and corrects orientation."""
     # Get preprocessed image and scaling info
     image_tensor, scale, (pad_x, pad_y) = corner_preprocess_image(image, device)
-    results = model(image_tensor)
+    # Check for which model return the most boxes
+    best_results = None
+    max_boxes = 0
+
+    # Loop through models to find the one with the most unique detected boxes
+    for i, model in enumerate(models):
+        results = model(image_tensor)
+
+        # Extract unique boxes based on their coordinates
+        unique_boxes = set(tuple(box.xyxy[0].tolist()) for box in results[0].boxes)
+        num_unique_boxes = len(unique_boxes)
+
+        if num_unique_boxes > max_boxes:
+            max_boxes = num_unique_boxes
+            best_results = results
+
+        st.write(f"Model {i + 1} returned {num_unique_boxes} unique boxes")
+
+    if best_results is None:
+        st.write("No unique boxes detected.")
+        return None
 
     # Initialize list to store detected corner points
     corners = []
-    for result in results:
+    for result in best_results:
         for box in result.boxes.xyxy:
             # Get bounding box coordinates
             x_min, y_min, x_max, y_max = map(int, box)
-            
+
             # Calculate center point
             center_x = (x_min + x_max) // 2
             center_y = (y_min + y_max) // 2
-            
+
             # Convert from padded coordinates back to original image coordinates
             orig_x = (center_x - pad_x) / scale
             orig_y = (center_y - pad_y) / scale
-            
+
             corners.append([int(orig_x), int(orig_y)])
 
     st.write("Detected corners:", corners)
@@ -1278,7 +1306,7 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
             rotated_image = cv2.rotate(image, rotation_code)
             rotated_tensor, scale, (pad_x, pad_y) = corner_preprocess_image(rotated_image, device)
             rotated_results = model(rotated_tensor)
-            
+
             # Detect corners in rotated image
             rotated_corners = []
             for result in rotated_results:
@@ -1289,7 +1317,7 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
                     orig_x = (center_x - pad_x) / scale
                     orig_y = (center_y - pad_y) / scale
                     rotated_corners.append([int(orig_x), int(orig_y)])
-            
+
             if len(rotated_corners) > len(max_corners):
                 st.write(f"Found {len(rotated_corners)} corners after {angle}° rotation")
                 max_corners = rotated_corners
@@ -1300,7 +1328,7 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
             corners = max_corners
             image = best_image
             st.image(image, caption=f"Rotated image with {len(corners)} corners")
-        
+
         # If we still don't have enough corners, return the original image
         if len(corners) <= 2:
             st.warning("Could not detect enough corners in any orientation")
@@ -1319,27 +1347,27 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
 
     if len(corners) >= 4:
         corners = np.array(corners, dtype="float32")
-        
+
         if len(corners) > 4:
             # Find the best 4 corners that form the largest rectangle
             max_area = 0
             best_corners = None
-            
+
             from itertools import combinations
             for four_corners in combinations(corners, 4):
                 four_corners = np.array(four_corners)
                 ordered = order_points(four_corners)
-                
+
                 # Calculate area using the ordered points
                 (bl, br, tl, tr) = ordered
                 width1 = np.linalg.norm(tr - tl)   # Top width
                 width2 = np.linalg.norm(br - bl)   # Bottom width
                 height1 = np.linalg.norm(tr - br)  # Right height
                 height2 = np.linalg.norm(tl - bl)  # Left height
-                
+
                 # Calculate average area
                 area = ((width1 + width2) / 2) * ((height1 + height2) / 2)
-                
+
                 # Keep track of largest area without angle verification
                 if area > max_area:
                     max_area = area
@@ -1357,16 +1385,16 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
         # Add debug visualization
         debug_img = image.copy()
         for i, corner in enumerate(corners):
-            cv2.circle(debug_img, (int(corner[0]), int(corner[1])), 
+            cv2.circle(debug_img, (int(corner[0]), int(corner[1])),
                       7, (0, 0, 255), -1)
             label = str(i)
             font = cv2.FONT_HERSHEY_SIMPLEX
-            cv2.putText(debug_img, label, 
+            cv2.putText(debug_img, label,
                        (int(corner[0]) - 10, int(corner[1]) - 10),
                        font, 0.8, (255, 255, 255), 2)
 
         st.image(debug_img, caption="Detected corners (numbered 0-3)")
-        
+
         # Expand corners outward
         center_x, center_y = np.mean(corners, axis=0)
         for i in range(4):
@@ -1376,7 +1404,7 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
         # Apply perspective transform
         cropped_id = four_point_transform(image, corners)
         st.image(cropped_id, caption="Cropped and transformed ID card")
-        
+
         # Check QR code position and rotate if necessary
         final_id, rotation_angle = check_qr_position(cropped_id)
         if rotation_angle != 0:
@@ -1386,6 +1414,7 @@ def detect_id_card(image, model, device, expand_ratio=0.1):
         return cropped_id
 
     return image
+
 
 def process_image(image):
     """Process the image using PaddleOCR and VietOCR"""
@@ -1397,11 +1426,11 @@ def process_image(image):
         return None
 
     # Ensure YOLO model is loaded
-    yolo_model = load_yolo_model()
+    yolo_models = load_yolo_model()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Get cropped and rotated image
-    processed_image = detect_id_card(image, yolo_model, device)
+    processed_image = detect_id_card(image, yolo_models, device)
 
     if processed_image is None:
         height, width = image.shape[:2]
