@@ -130,9 +130,3 @@ VnId-Card/
 *   Containerize the application using Docker for easier deployment.
 *   Add more comprehensive unit and integration tests.
 
-## License
-
-(Specify your license here, e.g., MIT License)
-
----
-*This README was generated with assistance from GitHub Copilot.*
