@@ -126,11 +126,11 @@ def load_yolo_model():
         # Model with less training data but more accurate per corner
         model1 = YOLO("corner_detection_model/weight/29_03_25-YOLOv11n-Corner-best_metrics.pt")
         model1.to(device)
-        # Model with more training data but less accurate per corner
-        model2 = YOLO("corner_detection_model/weight/29_03_25-YOLOv11n-Corner-All_files.pt")
-        model2.to(device)
-        models= [model1, model2]
-        # models = [model1]
+        # # Model with more training data but less accurate per corner
+        # model2 = YOLO("corner_detection_model/weight/29_03_25-YOLOv11n-Corner-All_files.pt")
+        # model2.to(device)
+        # models= [model1, model2]
+        models = [model1]
         return models
     except Exception as e:
         st.error(f"Error loading YOLO model: {e}")
