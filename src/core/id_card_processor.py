@@ -109,9 +109,8 @@ class IDCardProcessor:
 
     def process_image_wtih_vietocr(self, image: Image.Image) -> Dict[str, Any]:
         image1 = image.copy()
-        detect_model = self.model_manager.get_model('yolo_text_detection')
-        detect_model_v2 = self.model_manager.get_model(
-            'yolo_text_detection_v2')
+        detect_model = self.model_manager._load_yolo_text_detection_model()
+        detect_model_v2 = self.model_manager._load_yolo_text_detection_model_v2()
         viet_ocr_model = self.model_manager.get_model('vietocr')
         result1 = detect_model(image1)
         result2 = detect_model_v2(image1)
@@ -409,8 +408,7 @@ class IDCardProcessor:
             #     processed_image, cv2.COLOR_BGR2RGB))
 
             # Try Gemini processing first (if available)
-            info, image = self.process_image_wtih_vietocr(
-                Image.fromarray(cv2.cvtColor(processed_image, cv2.COLOR_BGR2RGB)))
+            info, image = self.process_image_wtih_vietocr(processed_image)
             # gemini_result = self.process_image_with_gemini(pil_image)
 
             # if gemini_result and any(gemini_result.values()):
