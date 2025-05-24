@@ -1,0 +1,360 @@
+"""
+MongoDB client for Vietnamese ID Card OCR application.
+"""
+
+import logging
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+from pymongo import MongoClient
+from pymongo.collection import Collection
+from pymongo.database import Database
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
+from src.config import get_config
+from .models import OCRResult, UserSession, ProcessingMetrics
+
+logger = logging.getLogger(__name__)
+
+
+class MongoDBClient:
+    """MongoDB client for OCR application."""
+
+    def __init__(self):
+        """Initialize MongoDB client."""
+        self.config = get_config()
+        self._client: Optional[MongoClient] = None
+        self._async_client: Optional[AsyncIOMotorClient] = None
+        self._db: Optional[Database] = None
+        self._async_db: Optional[AsyncIOMotorDatabase] = None
+        self._connected = False
+
+    def connect(self):
+        """Establish synchronous connection to MongoDB."""
+        try:
+            self._client = MongoClient(self.config.MONGODB_URL)
+            self._db = self._client[self.config.MONGODB_DATABASE]
+
+            # Test connection
+            self._client.admin.command('ping')
+            self._connected = True
+            logger.info(
+                f"Connected to MongoDB: {self.config.MONGODB_DATABASE}")
+
+            # Create indexes
+            self._create_indexes()
+
+        except Exception as e:
+            logger.error(f"Failed to connect to MongoDB: {e}")
+            self._connected = False
+            raise
+
+    async def connect_async(self):
+        """Establish asynchronous connection to MongoDB."""
+        try:
+            self._async_client = AsyncIOMotorClient(self.config.MONGODB_URL)
+            self._async_db = self._async_client[self.config.MONGODB_DATABASE]
+
+            # Test connection
+            await self._async_client.admin.command('ping')
+            self._connected = True
+            logger.info(
+                f"Connected to MongoDB (async): {self.config.MONGODB_DATABASE}")
+
+            # Create indexes
+            await self._create_indexes_async()
+
+        except Exception as e:
+            logger.error(f"Failed to connect to MongoDB (async): {e}")
+            self._connected = False
+            raise
+
+    def disconnect(self):
+        """Close synchronous connection."""
+        if self._client:
+            self._client.close()
+            self._connected = False
+            logger.info("Disconnected from MongoDB")
+
+    async def disconnect_async(self):
+        """Close asynchronous connection."""
+        if self._async_client:
+            self._async_client.close()
+            self._connected = False
+            logger.info("Disconnected from MongoDB (async)")
+
+    def _create_indexes(self):
+        """Create database indexes for better performance."""
+        if not self._db:
+            return
+
+        # OCR Results indexes
+        results_collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
+        results_collection.create_index("session_id")
+        results_collection.create_index("timestamp")
+        results_collection.create_index("id_number")
+
+        # Sessions indexes
+        sessions_collection = self._db[self.config.MONGODB_COLLECTION_SESSIONS]
+        sessions_collection.create_index("session_id", unique=True)
+        sessions_collection.create_index("created_at")
+
+        # Metrics indexes
+        metrics_collection = self._db[self.config.MONGODB_COLLECTION_METRICS]
+        metrics_collection.create_index("timestamp")
+        metrics_collection.create_index("operation")
+
+    async def _create_indexes_async(self):
+        """Create database indexes for better performance (async)."""
+        if not self._async_db:
+            return
+
+        # OCR Results indexes
+        results_collection = self._async_db[self.config.MONGODB_COLLECTION_RESULTS]
+        await results_collection.create_index("session_id")
+        await results_collection.create_index("timestamp")
+        await results_collection.create_index("id_number")
+
+        # Sessions indexes
+        sessions_collection = self._async_db[self.config.MONGODB_COLLECTION_SESSIONS]
+        await sessions_collection.create_index("session_id", unique=True)
+        await sessions_collection.create_index("created_at")
+
+        # Metrics indexes
+        metrics_collection = self._async_db[self.config.MONGODB_COLLECTION_METRICS]
+        await metrics_collection.create_index("timestamp")
+        await metrics_collection.create_index("operation")
+
+    @property
+    def is_connected(self) -> bool:
+        """Check if connected to MongoDB."""
+        return self._connected
+
+    # OCR Results operations
+    def save_ocr_result(self, result: OCRResult) -> str:
+        """Save OCR result to database."""
+        if not self._connected or not self._db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
+        result_dict = result.to_dict()
+        result_dict["timestamp"] = datetime.utcnow()
+
+        inserted = collection.insert_one(result_dict)
+        logger.info(f"Saved OCR result with ID: {inserted.inserted_id}")
+        return str(inserted.inserted_id)
+
+    async def save_ocr_result_async(self, result: OCRResult) -> str:
+        """Save OCR result to database (async)."""
+        if not self._connected or not self._async_db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._async_db[self.config.MONGODB_COLLECTION_RESULTS]
+        result_dict = result.to_dict()
+        result_dict["timestamp"] = datetime.utcnow()
+
+        inserted = await collection.insert_one(result_dict)
+        logger.info(f"Saved OCR result with ID: {inserted.inserted_id}")
+        return str(inserted.inserted_id)
+
+    def get_ocr_results_by_session(self, session_id: str) -> List[Dict[str, Any]]:
+        """Get all OCR results for a session."""
+        if not self._connected or not self._db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
+        results = list(collection.find(
+            {"session_id": session_id}).sort("timestamp", -1))
+
+        # Convert ObjectId to string
+        for result in results:
+            result["_id"] = str(result["_id"])
+
+        return results
+
+    async def get_ocr_results_by_session_async(self, session_id: str) -> List[Dict[str, Any]]:
+        """Get all OCR results for a session (async)."""
+        if not self._connected or not self._async_db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._async_db[self.config.MONGODB_COLLECTION_RESULTS]
+        cursor = collection.find(
+            {"session_id": session_id}).sort("timestamp", -1)
+        results = []
+
+        async for result in cursor:
+            result["_id"] = str(result["_id"])
+            results.append(result)
+
+        return results
+
+    def search_by_id_number(self, id_number: str) -> List[Dict[str, Any]]:
+        """Search OCR results by ID number."""
+        if not self._connected or not self._db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
+        results = list(collection.find(
+            {"extracted_info.id_number": id_number}).sort("timestamp", -1))
+
+        # Convert ObjectId to string
+        for result in results:
+            result["_id"] = str(result["_id"])
+
+        return results
+
+    # Session operations
+    def save_session(self, session: UserSession) -> str:
+        """Save user session to database."""
+        if not self._connected or not self._db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._db[self.config.MONGODB_COLLECTION_SESSIONS]
+        session_dict = session.to_dict()
+
+        # Use upsert to update existing session or create new one
+        result = collection.replace_one(
+            {"session_id": session.session_id},
+            session_dict,
+            upsert=True
+        )
+
+        logger.info(f"Saved session: {session.session_id}")
+        return session.session_id
+
+    async def save_session_async(self, session: UserSession) -> str:
+        """Save user session to database (async)."""
+        if not self._connected or not self._async_db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._async_db[self.config.MONGODB_COLLECTION_SESSIONS]
+        session_dict = session.to_dict()
+
+        # Use upsert to update existing session or create new one
+        await collection.replace_one(
+            {"session_id": session.session_id},
+            session_dict,
+            upsert=True
+        )
+
+        logger.info(f"Saved session: {session.session_id}")
+        return session.session_id
+
+    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get user session by ID."""
+        if not self._connected or not self._db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._db[self.config.MONGODB_COLLECTION_SESSIONS]
+        session = collection.find_one({"session_id": session_id})
+
+        if session:
+            session["_id"] = str(session["_id"])
+
+        return session
+
+    # Metrics operations
+    def save_metrics(self, metrics: ProcessingMetrics) -> str:
+        """Save processing metrics to database."""
+        if not self._connected or not self._db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._db[self.config.MONGODB_COLLECTION_METRICS]
+        metrics_dict = metrics.to_dict()
+        metrics_dict["timestamp"] = datetime.utcnow()
+
+        inserted = collection.insert_one(metrics_dict)
+        return str(inserted.inserted_id)
+
+    async def save_metrics_async(self, metrics: ProcessingMetrics) -> str:
+        """Save processing metrics to database (async)."""
+        if not self._connected or not self._async_db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        collection = self._async_db[self.config.MONGODB_COLLECTION_METRICS]
+        metrics_dict = metrics.to_dict()
+        metrics_dict["timestamp"] = datetime.utcnow()
+
+        inserted = await collection.insert_one(metrics_dict)
+        return str(inserted.inserted_id)
+
+    def get_metrics_summary(self, hours: int = 24) -> Dict[str, Any]:
+        """Get processing metrics summary for the last N hours."""
+        if not self._connected or not self._db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        from datetime import timedelta
+
+        collection = self._db[self.config.MONGODB_COLLECTION_METRICS]
+        since = datetime.utcnow() - timedelta(hours=hours)
+
+        pipeline = [
+            {"$match": {"timestamp": {"$gte": since}}},
+            {"$group": {
+                "_id": "$operation",
+                "count": {"$sum": 1},
+                "avg_duration": {"$avg": "$processing_time"},
+                "total_duration": {"$sum": "$processing_time"},
+                "success_count": {
+                    "$sum": {"$cond": [{"$eq": ["$success", True]}, 1, 0]}
+                }
+            }}
+        ]
+
+        results = list(collection.aggregate(pipeline))
+
+        summary = {
+            "time_period_hours": hours,
+            "operations": {},
+            "total_requests": 0,
+            "total_duration": 0
+        }
+
+        for result in results:
+            operation = result["_id"]
+            summary["operations"][operation] = {
+                "count": result["count"],
+                "success_rate": result["success_count"] / result["count"] * 100,
+                "avg_duration_seconds": result["avg_duration"],
+                "total_duration_seconds": result["total_duration"]
+            }
+            summary["total_requests"] += result["count"]
+            summary["total_duration"] += result["total_duration"]
+
+        return summary
+
+    def cleanup_old_data(self, days: int = 30):
+        """Clean up old data from the database."""
+        if not self._connected or not self._db:
+            raise RuntimeError("Not connected to MongoDB")
+
+        from datetime import timedelta
+
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+        # Clean up old OCR results
+        results_collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
+        deleted_results = results_collection.delete_many(
+            {"timestamp": {"$lt": cutoff_date}})
+
+        # Clean up old sessions
+        sessions_collection = self._db[self.config.MONGODB_COLLECTION_SESSIONS]
+        deleted_sessions = sessions_collection.delete_many(
+            {"created_at": {"$lt": cutoff_date}})
+
+        # Clean up old metrics
+        metrics_collection = self._db[self.config.MONGODB_COLLECTION_METRICS]
+        deleted_metrics = metrics_collection.delete_many(
+            {"timestamp": {"$lt": cutoff_date}})
+
+        logger.info(f"Cleaned up old data: {deleted_results.deleted_count} results, "
+                    f"{deleted_sessions.deleted_count} sessions, "
+                    f"{deleted_metrics.deleted_count} metrics")
+
+        return {
+            "deleted_results": deleted_results.deleted_count,
+            "deleted_sessions": deleted_sessions.deleted_count,
+            "deleted_metrics": deleted_metrics.deleted_count
+        }
+
+
+# Global database client instance
+db_client = MongoDBClient()

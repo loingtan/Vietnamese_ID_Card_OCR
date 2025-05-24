@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # API Service
+  vnid-api:
+    build: .
+    ports:
+      - "8080:8080"  # API
+      - "8000:8000"  # Metrics
+    environment:
+      - ENVIRONMENT=production
+      - API_HOST=0.0.0.0
+      - API_PORT=8080
+      - METRICS_PORT=8000
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Streamlit UI Service
+  vnid-streamlit:
+    build: .
+    command: ["streamlit", "run", "streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
+    ports:
+      - "8501:8501"
+    environment:
+      - ENVIRONMENT=production
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    depends_on:
+      - vnid-api
+    restart: unless-stopped
+
+  # Prometheus (optional monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+  # Grafana (optional monitoring)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+volumes:
+  grafana-storage:
