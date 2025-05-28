@@ -1,2 +1,15 @@
 .venv/*
 .idea/*
+.vscode/*
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+# Streamlit cache
+.streamlit/
+# Virtual environments
+.venv/
+venv/
+env/
+api.log

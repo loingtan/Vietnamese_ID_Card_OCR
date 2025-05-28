@@ -139,20 +139,39 @@ docker-compose up -d
 1. Start the FastAPI server: `make run-api`
 2. API documentation available at `http://localhost:8000/docs`
 3. Health check: `GET http://localhost:8000/health`
-4. Process ID card: `POST http://localhost:8000/process`
+4. Process ID card: `POST http://localhost:8000/process-id-card`
 
 #### Example API Usage:
 
 ```python
 import requests
 
-# Process an ID card image
-with open('id_card.jpg', 'rb') as f:
-    response = requests.post(
-        'http://localhost:8000/process',
-        files={'file': f}
-    )
-    result = response.json()
+# URL of the FastAPI endpoint
+url = "http://localhost:8080/process-id-card/"
+
+# Path to the image you want to send
+file_path = r"C:\path\to\file\image.jpeg"  
+
+# Open the file and send it via POST request
+with open(file_path, "rb") as f:
+    files = {"file": (file_path, f, "image/jpeg")}
+    headers = {"accept": "application/json"}
+    response = requests.post(url, files=files, headers=headers)
+
+# Output the response
+print("Status code:", response.status_code)
+try:
+    print("Response JSON:", response.json())
+except Exception as e:
+    print("Failed to parse JSON:", str(e))
+    print("Raw response:", response.text)
+```
+
+```bash
+>curl -X POST http://localhost:8080/process-id-card/ \
+    -H "accept: application/json" \
+    -H "Content-Type: multipart/form-data" \
+    -F "file=@C:\path\to\file\image.jpeg"
 ```
 
 ## ⚙️ Configuration

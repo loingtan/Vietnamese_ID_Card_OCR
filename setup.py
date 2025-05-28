@@ -21,7 +21,7 @@ def read_requirements(filename):
 try:
     requirements = read_requirements('requirements_windows.txt')
 except FileNotFoundError:
-    requirements = read_requirements('requirements_linux.txt')
+    requirements = read_requirements('requirements.txt')
 
 setup(
     name="vietnamese-id-card-ocr",

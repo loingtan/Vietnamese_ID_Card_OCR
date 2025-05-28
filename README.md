@@ -58,7 +58,7 @@ The system performs the following key steps:
 VnId-Card/
 ├── main.py                 # Main Streamlit application script
 ├── README.md               # This file
-├── requirements_linux.txt  # Python dependencies for Linux
+├── requirements.txt        # Python dependencies
 ├── requirements_windows.txt# Python dependencies for Windows
 ├── corner_detection_model/ # YOLO model for corner detection
 │   └── weight/
@@ -102,9 +102,9 @@ VnId-Card/
         ```bash
         pip install -r requirements_windows.txt
         ```
-    *   **For Linux:**
+    *   **For others:**
         ```bash
-        pip install -r requirements_linux.txt
+        pip install -r requirements.txt
         ```
     *   *(Note: You might need to install PyTorch/PaddlePaddle with CUDA support separately if not included or if you need a specific version. Refer to their official websites.)*
 
