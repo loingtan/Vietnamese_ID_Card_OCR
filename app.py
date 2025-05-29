@@ -42,7 +42,7 @@ def load_yolo_model_for_detect_text():
     """Load YOLO model for text detection"""
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = YOLO(r"yolo_detect_text/best.pt")
+        model = YOLO(r"model/text_detection/weights/best.pt")
         model.to(device)
         return model
     except Exception as e:
@@ -55,7 +55,7 @@ def load_yolo_model_for_detect_text_v2():
     """Load YOLO model for text detection"""
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = YOLO(r"yolo_detect_text/bestv2.pt")
+        model = YOLO(r"model/text_detection/weights/bestv2.pt")
         model.to(device)
         return model
     except Exception as e:
@@ -70,10 +70,10 @@ def load_yolo_model():
         device = "cuda" if torch.cuda.is_available() else "cpu"
         # Model with less training data but more accurate per corner
         model1 = YOLO(
-            "corner_detection_model/weight/29_03_25-YOLOv11n-Corner-best_metrics.pt")
+            "models/corner_detection/weights/29_03_25-YOLOv11n-Corner-best_metrics.pt")
         model1.to(device)
         # # Model with more training data but less accurate per corner
-        # model2 = YOLO("corner_detection_model/weight/29_03_25-YOLOv11n-Corner-All_files.pt")
+        # model2 = YOLO("models/corner_detection/weights/29_03_25-YOLOv11n-Corner-All_files.pt")
         # model2.to(device)
         # models= [model1, model2]
         models = [model1]

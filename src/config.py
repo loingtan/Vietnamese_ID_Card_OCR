@@ -16,13 +16,13 @@ class Config:
     DATA_DIR = BASE_DIR / "data"
     LOGS_DIR = BASE_DIR / "logs"
 
-    # Model paths
-    YOLO_CORNER_MODEL_PATH = BASE_DIR / "corner_detection_model" / \
-        "weight" / "29_03_25-YOLOv11n-Corner-best_metrics.pt"
-    YOLO_TEXT_MODEL_PATH = BASE_DIR / "yolo_detect_text" / "best.pt"
-    YOLO_TEXT_V2_MODEL_PATH = BASE_DIR / "yolo_detect_text" / "bestv2.pt"
-    DICTIONARY_PATH = BASE_DIR / "dictionary" / \
-        "dictionaries" / "hongocduc" / "words.txt"    # API Configuration
+    # Model paths (for local fallback)
+    YOLO_CORNER_MODEL_PATH = BASE_DIR / "models" / "corner_detection" / "weights" / "29_03_25-YOLOv11n-Corner-best_metrics.pt"
+    YOLO_TEXT_MODEL_PATH = BASE_DIR / "models" / "text_detection" / "weights" / "best.pt"
+    YOLO_TEXT_V2_MODEL_PATH = BASE_DIR / "models" / "text_detection" / "weights" / "bestv2.pt"
+    DICTIONARY_PATH = BASE_DIR / "dictionary" / "dictionaries" / "hongocduc" / "words.txt"
+
+    # API Configuration
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
     API_HOST = os.getenv("API_HOST", "0.0.0.0")
     API_PORT = int(os.getenv("API_PORT", "8080"))
@@ -31,12 +31,9 @@ class Config:
     # MongoDB Configuration
     MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
     MONGODB_DATABASE = os.getenv("MONGODB_DATABASE", "vnid_card_ocr")
-    MONGODB_COLLECTION_RESULTS = os.getenv(
-        "MONGODB_COLLECTION_RESULTS", "ocr_results")
-    MONGODB_COLLECTION_SESSIONS = os.getenv(
-        "MONGODB_COLLECTION_SESSIONS", "user_sessions")
-    MONGODB_COLLECTION_METRICS = os.getenv(
-        "MONGODB_COLLECTION_METRICS", "processing_metrics")
+    MONGODB_COLLECTION_RESULTS = os.getenv("MONGODB_COLLECTION_RESULTS", "ocr_results")
+    MONGODB_COLLECTION_SESSIONS = os.getenv("MONGODB_COLLECTION_SESSIONS", "user_sessions")
+    MONGODB_COLLECTION_METRICS = os.getenv("MONGODB_COLLECTION_METRICS", "processing_metrics")
 
     # Processing Configuration
     DEFAULT_CONFIDENCE_THRESHOLD = 0.5
@@ -50,6 +47,27 @@ class Config:
     # Logging Configuration
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+    # === MLflow Integration ===
+    MLFLOW_ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    MLFLOW_EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "Manual-Upload")
+
+    # Map model keys to MLflow run ID + artifact path
+    MLFLOW_MODEL_ARTIFACTS = {
+        "yolo_text": {
+            "run_id": os.getenv("MLFLOW_RUN_YOLO_TEXT", ""),
+            "artifact_path": "models/best.pt"
+        },
+        "yolo_text_v2": {
+            "run_id": os.getenv("MLFLOW_RUN_YOLO_TEXT_V2", ""),
+            "artifact_path": "models/bestv2.pt"
+        },
+        "yolo_corner": {
+            "run_id": os.getenv("MLFLOW_RUN_YOLO_CORNER", ""),
+            "artifact_path": "models/29_03_25-YOLOv11n-Corner-best_metrics.pt"
+        }
+    }
 
     @classmethod
     def ensure_directories(cls):
@@ -68,6 +86,11 @@ class Config:
         }
 
     @classmethod
+    def get_mlflow_model_config(cls) -> Dict[str, Dict[str, str]]:
+        """Return MLflow model mapping (run_id + artifact path)."""
+        return cls.MLFLOW_MODEL_ARTIFACTS
+
+    @classmethod
     def validate_setup(cls) -> Dict[str, bool]:
         """Validate that all required files exist."""
         model_paths = cls.get_model_paths()
@@ -79,23 +102,17 @@ class Config:
         return validation_results
 
 
-# Development configuration
 class DevelopmentConfig(Config):
-    """Development-specific configuration."""
     DEBUG = True
     LOG_LEVEL = "DEBUG"
 
 
-# Production configuration
 class ProductionConfig(Config):
-    """Production-specific configuration."""
     DEBUG = False
     LOG_LEVEL = "INFO"
 
 
-# Test configuration
 class TestConfig(Config):
-    """Test-specific configuration."""
     DEBUG = True
     LOG_LEVEL = "DEBUG"
     FORCE_CPU = True
@@ -104,7 +121,6 @@ class TestConfig(Config):
 def get_config() -> Config:
     """Get configuration based on environment."""
     env = os.getenv("ENVIRONMENT", "development").lower()
-
     if env == "production":
         return ProductionConfig()
     elif env == "test":
