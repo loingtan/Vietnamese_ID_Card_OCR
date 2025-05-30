@@ -11,16 +11,18 @@ import numpy as np
 from PIL import Image
 import io
 import logging
-from prometheus_client import Counter, Histogram, start_http_server, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter, Histogram, start_http_server, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry
 from fastapi import Response
 import time
 from typing import Dict, Any, Optional
 import json
 from datetime import datetime
 import os
+import uuid
 
 from ..models.model_manager import ModelManager
 from ..core.id_card_processor import IDCardProcessor
+from src.database import MongoDBClient, OCRResult
 
 
 # Metrics
@@ -40,6 +42,10 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+MONGODB_URL = "mongodb://localhost:27017"  # URL kết nối MongoDB
+MONGODB_DATABASE = "id_card_ocr"  # Tên database
+MONGODB_COLLECTION_RESULTS = "ocr_results"  # Collection lưu kết quả
 
 
 class IDCardAPI:
@@ -69,6 +75,10 @@ class IDCardAPI:
 
         # Feature store (simple in-memory cache for demo)
         self.feature_store = {}
+
+        # Khởi tạo MongoDB client
+        self.db_client = MongoDBClient()
+        self.db_client.connect()
 
         # Setup routes
         self._setup_routes()
@@ -126,12 +136,28 @@ class IDCardAPI:
                 else:
                     ERROR_COUNT.inc()
 
-                return {
-                    "status": "success",
-                    "processing_time": processing_time,
-                    "filename": file.filename,
-                    "result": result
-                }
+                # Sau khi xử lý ảnh và có kết quả
+                session_id = str(uuid.uuid4())
+                
+                # Tạo OCRResult object
+                ocr_result = OCRResult(
+                    session_id=session_id,
+                    image_filename=file.filename,
+                    extracted_info=result.get('extracted_info', {}),
+                    processing_time=processing_time,
+                    confidence_scores=result.get('confidence_scores', {}),
+                    detected_text_regions=result.get('detected_regions', []),
+                    success=True
+                )
+                
+                # Lưu vào database
+                result_id = self.db_client.save_ocr_result(ocr_result)
+                
+                # Thêm ID vào kết quả trả về
+                result['database_id'] = result_id
+                result['session_id'] = session_id
+                
+                return result
 
             except HTTPException:
                 raise
@@ -156,8 +182,17 @@ class IDCardAPI:
         @self.app.get("/metrics")
         async def get_metrics():
             """Prometheus metrics endpoint."""
+            # Create a new registry
+            custom_registry = CollectorRegistry()
+
+            # Unregister the duplicate metrics
+            custom_registry.unregister('request_count')
+            custom_registry.unregister('request_count_total')
+            custom_registry.unregister('request_count_created')
+
+            # Now you can register your metrics
             return Response(
-                generate_latest(),
+                generate_latest(custom_registry),
                 media_type=CONTENT_TYPE_LATEST
             )
 

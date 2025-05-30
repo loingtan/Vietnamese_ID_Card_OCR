@@ -7,21 +7,59 @@ import cv2
 import numpy as np
 from PIL import Image
 import pandas as pd
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 import os
 from pathlib import Path
+import argparse
+import uuid
+import time
+from datetime import datetime
+import logging
 
 from ..models.model_manager import ModelManager
 from ..core.id_card_processor import IDCardProcessor
+from src.database import MongoDBClient, OCRResult, UserSession
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('streamlit.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 class StreamlitUI:
     """Streamlit user interface for ID Card OCR."""
 
-    def __init__(self):
+    def __init__(self, port: int = 8501):
+        self.port = port
         self.setup_page_config()
         self.model_manager = None
         self.processor = None
+        self.db_client = MongoDBClient()
+        try:
+            self.db_client.connect()
+            logger.info("Successfully connected to MongoDB")
+        except Exception as e:
+            logger.error(f"Failed to connect to MongoDB: {e}")
+            st.error(f"Failed to connect to MongoDB: {e}")
+        
+        # Initialize session
+        if 'session_id' not in st.session_state:
+            st.session_state.session_id = str(uuid.uuid4())
+            try:
+                session = UserSession(
+                    session_id=st.session_state.session_id,
+                    created_at=datetime.utcnow()
+                )
+                self.db_client.save_session(session)
+                logger.info(f"Created new session: {st.session_state.session_id}")
+            except Exception as e:
+                logger.error(f"Failed to create session: {e}")
+                st.error(f"Failed to create session: {e}")
 
     def setup_page_config(self):
         """Configure Streamlit page settings."""
@@ -36,6 +74,9 @@ class StreamlitUI:
         """Setup sidebar with configuration options."""
         st.sidebar.title("⚙️ Configuration")
 
+        # Add navigation
+        page = st.sidebar.radio("Navigation", ["Scan ID Card", "View History"])
+
         # API Key input
         api_key = st.sidebar.text_input(
             "Gemini API Key (Optional)",
@@ -49,6 +90,22 @@ class StreamlitUI:
             ["Auto (Gemini + OCR)", "Traditional OCR Only", "Gemini Only"],
             index=0
         )
+
+        # Batch processing options
+        with st.sidebar.expander("Batch Processing Settings"):
+            batch_size = st.number_input(
+                "Maximum Images per Batch",
+                min_value=1,
+                max_value=10,
+                value=5,
+                help="Maximum number of images to process in one batch"
+            )
+            
+            parallel_processing = st.checkbox(
+                "Enable Parallel Processing",
+                value=False,
+                help="Process multiple images simultaneously (experimental)"
+            )
 
         # Advanced settings
         with st.sidebar.expander("Advanced Settings"):
@@ -74,11 +131,14 @@ class StreamlitUI:
             )
 
         return {
+            'page': page,
             'api_key': api_key,
             'processing_method': processing_method,
             'confidence_threshold': confidence_threshold,
             'nms_threshold': nms_threshold,
-            'enhance_image': enhance_image
+            'enhance_image': enhance_image,
+            'batch_size': batch_size,
+            'parallel_processing': parallel_processing
         }
 
     def initialize_models(self, api_key: str = None):
@@ -113,91 +173,248 @@ class StreamlitUI:
         with col4:
             st.metric("Accuracy", "95%+")
 
-    def upload_image(self):
-        """Handle image upload."""
-        uploaded_file = st.file_uploader(
-            "Choose an ID card image",
+    def process_batch_images(self, images: List[np.ndarray]) -> List[Dict[str, Any]]:
+        """Process a batch of images."""
+        results = []
+        total_images = len(images)
+        
+        # Create progress bar
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for idx, image in enumerate(images):
+            status_text.text(f"Processing image {idx + 1} of {total_images}")
+            
+            try:
+                # Process the image
+                result = self.processor.process_id_card(image)
+                results.append(result)
+            except Exception as e:
+                logger.error(f"Error processing image {idx + 1}: {e}")
+                results.append({
+                    'status': 'error',
+                    'message': str(e)
+                })
+            
+            # Update progress
+            progress_bar.progress((idx + 1) / total_images)
+        
+        # Clear progress indicators
+        progress_bar.empty()
+        status_text.empty()
+        
+        return results
+
+    def upload_images(self) -> Tuple[List[np.ndarray], Any]:
+        """Handle multiple image uploads."""
+        uploaded_files = st.file_uploader(
+            "Choose ID card images",
             type=['png', 'jpg', 'jpeg'],
-            help="Upload a clear image of a Vietnamese ID card"
+            accept_multiple_files=True,
+            help="Upload one or more images of Vietnamese ID cards"
         )
 
-        if uploaded_file is not None:
-            # Display uploaded image
-            image = Image.open(uploaded_file)
+        if uploaded_files:
+            # Display uploaded images
+            images = []
+            cols = st.columns(min(3, len(uploaded_files)))
+            
+            for idx, uploaded_file in enumerate(uploaded_files):
+                col = cols[idx % 3]
+                with col:
+                    st.subheader(f"Image {idx + 1}")
+                    image = Image.open(uploaded_file)
+                    st.image(image, use_column_width=True)
+                    
+                    # Convert to numpy array for processing
+                    image_array = np.array(image)
+                    if len(image_array.shape) == 3 and image_array.shape[2] == 3:
+                        # Convert RGB to BGR for OpenCV
+                        image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+                    images.append(image_array)
 
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.subheader("📤 Uploaded Image")
-                st.image(image, use_column_width=True)
-
-            # Convert to numpy array for processing
-            image_array = np.array(image)
-            if len(image_array.shape) == 3 and image_array.shape[2] == 3:
-                # Convert RGB to BGR for OpenCV
-                image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
-
-            return image_array, col2
+            return images, st.container()
 
         return None, None
 
-    def display_results(self, results: Dict[str, Any], col):
-        """Display processing results."""
-        with col:
-            st.subheader("📋 Extracted Information")
-
-            if results.get('status') == 'success':
-                extracted_info = results.get('extracted_info', {})
-                method = results.get('method', 'unknown')
-
-                # Display processing method
-                st.info(f"🔍 Processed using: {method.title()}")
-
-                if extracted_info:
-                    # Create a nice display of the extracted information
-                    info_data = []
-                    field_labels = {
-                        'id_number': '🆔 ID Number',
-                        'full_name': '👤 Full Name',
-                        'date_of_birth': '📅 Date of Birth',
-                        'sex': '⚥ Gender',
-                        'nationality': '🏳️ Nationality',
-                        'place_of_origin': '🏠 Place of Origin',
-                        'place_of_residence': '📍 Place of Residence',
-                        'date_of_expiry': '⏰ Date of Expiry'
-                    }
-
-                    for key, value in extracted_info.items():
-                        if value:
-                            label = field_labels.get(
-                                key, key.replace('_', ' ').title())
-                            info_data.append(
-                                {'Field': label, 'Value': str(value)})
-
-                    if info_data:
-                        df = pd.DataFrame(info_data)
-                        st.dataframe(df, use_container_width=True,
-                                     hide_index=True)
-
-                        # Download button
-                        csv = df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download as CSV",
-                            data=csv,
-                            file_name="id_card_info.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        st.warning(
-                            "⚠️ No information could be extracted from the image.")
-                else:
-                    st.warning(
-                        "⚠️ No information could be extracted from the image.")
-
-            elif results.get('status') == 'error':
-                st.error(
-                    f"❌ Processing failed: {results.get('message', 'Unknown error')}")
+    def display_history(self):
+        """Display history of processed ID cards."""
+        st.title("📚 Processing History")
+        
+        try:
+            # Get results from MongoDB
+            results = self.db_client.get_ocr_results_by_session(st.session_state.session_id)
+            logger.info(f"Retrieved {len(results)} results for session {st.session_state.session_id}")
+            
+            if not results:
+                st.info("No processing history found.")
+                return
+                
+            # Convert results to DataFrame
+            history_data = []
+            for result in results:
+                info = result.get('extracted_info', {})
+                history_data.append({
+                    'Timestamp': result.get('timestamp', ''),
+                    'ID Number': info.get('id_number', ''),
+                    'Full Name': info.get('full_name', ''),
+                    'Date of Birth': info.get('date_of_birth', ''),
+                    'Gender': info.get('sex', ''),
+                    'Nationality': info.get('nationality', ''),
+                    'Place of Origin': info.get('place_of_origin', ''),
+                    'Place of Residence': info.get('place_of_residence', ''),
+                    'Date of Expiry': info.get('date_of_expiry', '')
+                })
+                
+            if history_data:
+                df = pd.DataFrame(history_data)
+                df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+                st.dataframe(df, use_container_width=True)
+                
+                # Download button
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download History as CSV",
+                    data=csv,
+                    file_name="id_card_history.csv",
+                    mime="text/csv"
+                )
             else:
-                st.warning("⚠️ Unexpected result format.")
+                st.info("No processing history found.")
+        except Exception as e:
+            logger.error(f"Error displaying history: {e}")
+            st.error(f"Error displaying history: {e}")
+
+    def check_duplicate_id(self, id_number: str) -> Dict[str, Any]:
+        """Check if ID number already exists in database."""
+        try:
+            results = self.db_client.search_by_id_number(id_number)
+            if results:
+                # Get the most recent result
+                latest_result = results[0]
+                return {
+                    'is_duplicate': True,
+                    'previous_result': latest_result,
+                    'total_occurrences': len(results)
+                }
+            return {'is_duplicate': False}
+        except Exception as e:
+            logger.error(f"Error checking duplicate ID: {e}")
+            return {'is_duplicate': False, 'error': str(e)}
+
+    def display_duplicate_warning(self, duplicate_info: Dict[str, Any]):
+        """Display warning for duplicate ID card."""
+        if duplicate_info.get('is_duplicate'):
+            st.warning("⚠️ This ID card has been processed before!")
+            
+            # Show previous processing details
+            with st.expander("View Previous Processing Details"):
+                prev_result = duplicate_info['previous_result']
+                info = prev_result.get('extracted_info', {})
+                
+                # Display previous processing info
+                st.write(f"**Last Processed:** {prev_result.get('timestamp', 'Unknown')}")
+                st.write(f"**Total Occurrences:** {duplicate_info['total_occurrences']}")
+                
+                # Display extracted information
+                st.write("**Extracted Information:**")
+                for key, value in info.items():
+                    if value:
+                        st.write(f"- {key.replace('_', ' ').title()}: {value}")
+
+    def display_batch_results(self, results: List[Dict[str, Any]], container):
+        """Display results for a batch of processed images."""
+        with container:
+            st.subheader("📋 Batch Processing Results")
+            
+            # Create tabs for each image result
+            tabs = st.tabs([f"Image {i+1}" for i in range(len(results))])
+            
+            for idx, (tab, result) in enumerate(zip(tabs, results)):
+                with tab:
+                    if result.get('status') == 'success':
+                        extracted_info = result.get('extracted_info', {})
+                        
+                        # Check for duplicate ID
+                        id_number = extracted_info.get('id_number')
+                        if id_number:
+                            duplicate_info = self.check_duplicate_id(id_number)
+                            self.display_duplicate_warning(duplicate_info)
+                        
+                        # Display extracted information
+                        if extracted_info:
+                            info_data = []
+                            field_labels = {
+                                'id_number': '🆔 ID Number',
+                                'full_name': '👤 Full Name',
+                                'date_of_birth': '📅 Date of Birth',
+                                'sex': '⚥ Gender',
+                                'nationality': '🏳️ Nationality',
+                                'place_of_origin': '🏠 Place of Origin',
+                                'place_of_residence': '📍 Place of Residence',
+                                'date_of_expiry': '⏰ Date of Expiry'
+                            }
+                            
+                            for key, value in extracted_info.items():
+                                if value:
+                                    label = field_labels.get(key, key.replace('_', ' ').title())
+                                    info_data.append({'Field': label, 'Value': str(value)})
+                            
+                            if info_data:
+                                df = pd.DataFrame(info_data)
+                                st.dataframe(df, use_container_width=True, hide_index=True)
+                                
+                                try:
+                                    # Save to MongoDB
+                                    ocr_result = OCRResult(
+                                        session_id=st.session_state.session_id,
+                                        image_filename=f"uploaded_image_{idx+1}.jpg",
+                                        extracted_info=extracted_info,
+                                        processing_time=0.0,
+                                        confidence_scores={},
+                                        detected_text_regions=[],
+                                        success=True
+                                    )
+                                    result_id = self.db_client.save_ocr_result(ocr_result)
+                                    logger.info(f"Saved OCR result with ID: {result_id}")
+                                    st.success("✅ Results saved to database!")
+                                except Exception as e:
+                                    logger.error(f"Failed to save to MongoDB: {e}")
+                                    st.error(f"Failed to save to database: {e}")
+                                
+                                # Download button for individual result
+                                csv = df.to_csv(index=False)
+                                st.download_button(
+                                    label=f"📥 Download Image {idx+1} Results",
+                                    data=csv,
+                                    file_name=f"id_card_info_{idx+1}.csv",
+                                    mime="text/csv"
+                                )
+                            else:
+                                st.warning("⚠️ No information could be extracted from the image.")
+                        else:
+                            st.warning("⚠️ No information could be extracted from the image.")
+                    else:
+                        st.error(f"❌ Processing failed: {result.get('message', 'Unknown error')}")
+            
+            # Add batch download option
+            if any(r.get('status') == 'success' for r in results):
+                all_data = []
+                for idx, result in enumerate(results):
+                    if result.get('status') == 'success':
+                        info = result.get('extracted_info', {})
+                        info['Image_Number'] = idx + 1
+                        all_data.append(info)
+                
+                if all_data:
+                    batch_df = pd.DataFrame(all_data)
+                    batch_csv = batch_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download All Results",
+                        data=batch_csv,
+                        file_name="batch_id_card_results.csv",
+                        mime="text/csv"
+                    )
 
     def display_processing_info(self):
         """Display information about the processing pipeline."""
@@ -222,10 +439,15 @@ class StreamlitUI:
 
     def run(self):
         """Main application run method."""
-        self.display_header()
-
         # Setup sidebar and get configuration
         config = self.setup_sidebar()
+
+        # Handle navigation
+        if config['page'] == "View History":
+            self.display_history()
+            return
+
+        self.display_header()
 
         # Initialize models
         if not self.initialize_models(config.get('api_key')):
@@ -235,17 +457,26 @@ class StreamlitUI:
         self.display_processing_info()
 
         # Image upload and processing
-        image_array, results_col = self.upload_image()
+        images, results_container = self.upload_images()
 
-        if image_array is not None:
+        if images:
+            # Limit batch size
+            if len(images) > config['batch_size']:
+                st.warning(f"⚠️ Maximum {config['batch_size']} images allowed. Only the first {config['batch_size']} images will be processed.")
+                images = images[:config['batch_size']]
+
             # Process button
-            if st.button("🚀 Process ID Card", type="primary"):
-                with st.spinner("Processing image... Please wait."):
+            if st.button("🚀 Process ID Cards", type="primary"):
+                with st.spinner("Processing images... Please wait."):
                     try:
-                        results = self.processor.process_id_card(image_array)
-                        self.display_results(results, results_col)
+                        # Process the batch
+                        results = self.process_batch_images(images)
+                        
+                        # Display results
+                        self.display_batch_results(results, results_container)
+                        
                     except Exception as e:
-                        st.error(f"❌ Processing failed: {str(e)}")
+                        st.error(f"❌ Error processing images: {str(e)}")
 
         # Footer
         st.markdown("---")
@@ -259,10 +490,16 @@ class StreamlitUI:
 
 
 def main():
-    """Main entry point for Streamlit app."""
-    app = StreamlitUI()
-    app.run()
+    """Main entry point for the Streamlit application."""
+    parser = argparse.ArgumentParser(description='Vietnamese ID Card OCR Streamlit App')
+    parser.add_argument('--port', type=int, default=8501, help='Port to run the Streamlit app on')
+    args = parser.parse_args()
+    
+    ui = StreamlitUI(port=args.port)
+    ui.run()
 
 
 if __name__ == "__main__":
     main()
+
+__all__ = ['main']

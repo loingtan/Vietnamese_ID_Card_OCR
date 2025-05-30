@@ -7,7 +7,7 @@ from ultralytics import YOLO
 from vietocr.tool.predictor import Predictor
 from vietocr.tool.config import Cfg
 from transformers import pipeline
-from google import genai
+import google.generativeai as genai
 import streamlit as st
 from pathlib import Path
 import os
