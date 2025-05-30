@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  # API Service
+  vnid-api:
+    build: 
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile
+    ports:
+      - "8000:8000"  # API
+      - "9090:9090"  # Metrics
+    environment:
+      - ENVIRONMENT=production
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - METRICS_PORT=9090
+      - LOG_LEVEL=INFO
+    volumes:
+      - ../../logs:/app/logs
+      - ../../data/models:/app/data/models
+      - ../../data/uploads:/app/data/uploads
+      - ../../data/outputs:/app/data/outputs
+      - ../../config/.env:/app/.env:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Streamlit UI Service
+  vnid-streamlit:
+    build: 
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile
+    command: ["streamlit", "run", "streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
+    ports:
+      - "8501:8501"
+    environment:
+      - ENVIRONMENT=production
+      - STREAMLIT_HOST=0.0.0.0
+      - STREAMLIT_PORT=8501
+    volumes:
+      - ../../logs:/app/logs
+      - ../../data/models:/app/data/models
+      - ../../data/uploads:/app/data/uploads
+      - ../../data/outputs:/app/data/outputs
+      - ../../config/.env:/app/.env:ro
+    depends_on:
+      - vnid-api
+    restart: unless-stopped
+
+  # MongoDB (optional database)
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=vnid_card_ocr
+    volumes:
+      - mongodb_data:/data/db
+      - ../../logs:/var/log/mongodb
+    restart: unless-stopped
+    profiles: ["database"]
+
+  # Prometheus (optional monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ../../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../../monitoring/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+  # Grafana (optional monitoring)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+volumes:
+  grafana-storage:

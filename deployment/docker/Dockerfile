@@ -20,15 +20,20 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
+COPY requirements_windows.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy configuration
+COPY config/ ./config/
 
 # Copy source code
 COPY src/ ./src/
 COPY *.py ./
 COPY README.md ./
+COPY setup.py ./
 
-# Copy model files (these should be mounted or downloaded separately in production)
+# Copy data directory structure (without large model files)
+COPY data/dictionary/ ./data/dictionary/
 COPY corner_detection_model/ ./corner_detection_model/
 COPY yolo_detect_text/ ./yolo_detect_text/
 

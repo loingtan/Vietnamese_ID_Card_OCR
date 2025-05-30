@@ -15,19 +15,42 @@ from datetime import datetime
 
 import torch
 
-from ..models.model_manager import ModelManager
-from ..utils.image_processing import (
-    apply_nms, calculate_iou, detect_id_card, draw_yolo, sharpen_image, warp_and_recognize,
+# Try relative imports first, fallback to absolute imports for testing
+try:
+    from ..models.model_manager import ModelManager
+    from ..utils.image_processing import (
+        apply_nms, calculate_iou, detect_id_card, draw_yolo, sharpen_image, warp_and_recognize,
 
-    pil_to_bytes, resize_image, enhance_image
-)
-from ..utils.text_processing import (
-    extract_id_number, extract_dates, extract_gender,
-    is_vietnamese_name, normalize_vietnamese_text,
-    validate_id_card_fields, load_vietnamese_dictionary
-)
-from ..database.mongodb import db_client
-from ..database.models import OCRResult, ProcessingMetrics, IDCardInfo
+        pil_to_bytes, resize_image, enhance_image
+    )
+    from ..utils.text_processing import (
+        extract_id_number, extract_dates, extract_gender,
+        is_vietnamese_name, normalize_vietnamese_text,
+        validate_id_card_fields, load_vietnamese_dictionary
+    )
+    from ..database.mongodb import db_client
+    from ..database.models import OCRResult, ProcessingMetrics, IDCardInfo
+    from ..config import get_config
+except ImportError:
+    from models.model_manager import ModelManager
+    from utils.image_processing import (
+        apply_nms, calculate_iou, detect_id_card, draw_yolo, sharpen_image, warp_and_recognize,
+
+        pil_to_bytes, resize_image, enhance_image
+    )
+    from utils.text_processing import (
+        extract_id_number, extract_dates, extract_gender,
+        is_vietnamese_name, normalize_vietnamese_text,
+        validate_id_card_fields, load_vietnamese_dictionary
+    )
+    # For testing, create mock objects for database
+    from types import SimpleNamespace
+    db_client = SimpleNamespace()
+    db_client.is_connected = False
+    OCRResult = dict
+    ProcessingMetrics = dict
+    IDCardInfo = dict
+    from config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +59,7 @@ class IDCardProcessor:
     """Main processor for Vietnamese ID Card OCR."""
 
     def __init__(self, model_manager: ModelManager):
+        self.config = get_config()
         self.model_manager = model_manager
         self.vietnamese_words = load_vietnamese_dictionary()
 

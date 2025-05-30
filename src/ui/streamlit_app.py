@@ -13,12 +13,14 @@ from pathlib import Path
 
 from ..models.model_manager import ModelManager
 from ..core.id_card_processor import IDCardProcessor
+from ..config import get_config
 
 
 class StreamlitUI:
     """Streamlit user interface for ID Card OCR."""
 
     def __init__(self):
+        self.config = get_config()
         self.setup_page_config()
         self.model_manager = None
         self.processor = None

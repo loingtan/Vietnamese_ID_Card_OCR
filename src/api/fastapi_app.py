@@ -26,10 +26,31 @@ from datetime import datetime
 import os
 import threading
 
-from ..models.model_manager import ModelManager
-from ..core.id_card_processor import IDCardProcessor
-from ..webhooks.alert_handlers import router as alert_router
+# Try relative imports first, fallback to absolute imports for testing
+try:
+    from ..models.model_manager import ModelManager
+    from ..core.id_card_processor import IDCardProcessor
+    from ..webhooks.alert_handlers import router as alert_router
+    from ..config import get_config
+except ImportError:
+    from models.model_manager import ModelManager
+    from core.id_card_processor import IDCardProcessor
+    from webhooks.alert_handlers import router as alert_router
+    from config import get_config
 
+# Load configuration
+config = get_config()
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, config.LOG_LEVEL),
+    format=config.LOG_FORMAT,
+    handlers=[
+        logging.FileHandler(config.LOGS_DIR / "api.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Enhanced Metrics for Comprehensive Monitoring
 REQUEST_COUNT = Counter('request_count_total', 'Total requests processed')

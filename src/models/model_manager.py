@@ -12,14 +12,33 @@ import streamlit as st
 from pathlib import Path
 import os
 
+# Import the new configuration system
+try:
+    from ...config.settings import get_config
+    CONFIG_AVAILABLE = True
+except ImportError:
+    # Fallback for legacy imports
+    CONFIG_AVAILABLE = False
+
 
 class ModelManager:
     """Manages all models used in the Vietnamese ID Card OCR system."""
 
-    def __init__(self, api_key: str = None):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+    def __init__(self, api_key: str = None, config=None):
+        if CONFIG_AVAILABLE and config is None:
+            self.config = get_config()
+        else:
+            self.config = config
+
+        # Set device based on config or auto-detection
+        if hasattr(self.config, 'models') and self.config.models.device != "auto":
+            self.device = self.config.models.device
+        else:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
         self.models = {}
-        self.api_key = api_key
+        self.api_key = api_key or (self.config.google_ai_api_key if hasattr(
+            self.config, 'google_ai_api_key') else None)
         self._load_all_models()
 
     def _load_all_models(self):

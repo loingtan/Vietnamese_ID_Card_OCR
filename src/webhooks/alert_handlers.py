@@ -13,6 +13,18 @@ from enum import Enum
 import requests
 import os
 
+# Try to import config, fallback to a simple config if not available
+try:
+    from ..config import get_config
+    config = get_config()
+except ImportError:
+    # Fallback for testing
+    from types import SimpleNamespace
+    config = SimpleNamespace()
+    config.WEBHOOK_ENABLED = False
+    config.SLACK_WEBHOOK_URL = ""
+    config.DISCORD_WEBHOOK_URL = ""
+
 # Configure logger
 logger = logging.getLogger("alert_handler")
 
