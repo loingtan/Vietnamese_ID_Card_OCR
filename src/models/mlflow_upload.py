@@ -1,17 +1,36 @@
 import mlflow
 import os
+import sys
 from pathlib import Path
 
+# Fix import path
+current_dir = Path(__file__).resolve().parent
+project_root = current_dir.parent.parent
+sys.path.append(str(project_root))
+
+from src.config import Config
+
+'''This script uploads and registers local model weights to MLflow.'''
+
 # === CONFIG ===
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
-EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "Manual-Upload")
-MODEL_FILES = {
-    "yolo_text_detect": "./models/text_detection/weights/best.pt",
-    "yolo_text_detect_v2": "./models/text_detection/weights/bestv2.pt",
-    "yolo_corner_detect": "./models/corner_detection/weights/29_03_25-YOLOv11n-Corner-best_metrics.pt"
+config = Config()
+MLFLOW_TRACKING_URI = config.MLFLOW_TRACKING_URI
+EXPERIMENT_NAME = "Manual-Upload"
+
+# Use paths from Config
+LOCAL_MODEL_WEIGHTS = {
+    "yolo_text": str(config.YOLO_TEXT_MODEL_PATH),
+    "yolo_text_v2": str(config.YOLO_TEXT_V2_MODEL_PATH),
+    "yolo_corner": str(config.YOLO_CORNER_MODEL_PATH)
 }
 
+# Use MLflow artifact config from Config
+MLFLOW_MODEL_ARTIFACTS = config.MLFLOW_MODEL_ARTIFACTS
+
 # === SETUP ===
+if not config.MLFLOW_ENABLED:
+    raise RuntimeError("MLflow is not enabled in configuration")
+
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
 if experiment is None:
@@ -22,7 +41,7 @@ else:
 # === UPLOAD AND REGISTER EACH MODEL ===
 run_ids = {}
 
-for model_key, file_path in MODEL_FILES.items():
+for model_key, file_path in LOCAL_MODEL_WEIGHTS.items():
     file_path = Path(file_path)
     if not file_path.exists():
         print(f"⚠️ Skipping {model_key}: file not found at {file_path}")
@@ -30,12 +49,16 @@ for model_key, file_path in MODEL_FILES.items():
 
     with mlflow.start_run(experiment_id=experiment_id) as run:
         run_id = run.info.run_id
-        artifact_path = "model"
+        # Use artifact path from config
+        artifact_path = MLFLOW_MODEL_ARTIFACTS[model_key]["artifact_path"].split("/")[0]  # Get base path (e.g., "model")
+        
         mlflow.log_artifact(str(file_path), artifact_path=artifact_path)
-        # Register the model
+        
+        # Register the model with version from config
         model_name = model_key
-        # Use mlflow.pyfunc to register a generic model artifact
+        version = MLFLOW_MODEL_ARTIFACTS[model_key].get("version", "1")
         model_uri = f"runs:/{run_id}/{artifact_path}/{file_path.name}"
+        
         try:
             result = mlflow.register_model(model_uri, model_name)
             print(f"✅ Registered {model_key} as MLflow Model: {model_name} (version {result.version})")
@@ -58,9 +81,10 @@ for model_key, file_path in MODEL_FILES.items():
 # === PRINT SUMMARY ===
 print("\n=== Model Upload & Registration Summary ===")
 for model_key, info in run_ids.items():
+    artifact_path = MLFLOW_MODEL_ARTIFACTS[model_key]["artifact_path"]
     print(
         f"{model_key} -> run_id='{info['run_id']}', "
-        f"artifact_path='{info['artifact_path']}/{model_key}.pt', "
+        f"artifact_path='{artifact_path}', "
         f"model_name='{info['model_name']}', "
         f"model_version='{info['model_version']}'"
     )

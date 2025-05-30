@@ -10,56 +10,104 @@ from transformers import pipeline
 from google import genai
 import streamlit as st
 from pathlib import Path
+import os
 import mlflow
-from mlflow import artifacts
-from src.config import Config
-
+from src.config import get_config
 
 class ModelManager:
     """Manages all models used in the Vietnamese ID Card OCR system."""
 
     def __init__(self, api_key: str = None):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.config = get_config()
+        self.device = "cuda" if torch.cuda.is_available() and not self.config.FORCE_CPU else "cpu"
         self.models = {}
         self.api_key = api_key
-
-        # Use MLflow config from config.py
-        self.mlflow_enabled = Config.MLFLOW_ENABLED
-        self.mlflow_tracking_uri = Config.MLFLOW_TRACKING_URI
-        self.mlflow_model_artifacts = Config.get_mlflow_model_config()
-        mlflow.set_tracking_uri(self.mlflow_tracking_uri)
-
-        # Fallback paths for local weights
-        self.local_weights = {
-            "yolo_text_detect": str(Config.YOLO_TEXT_MODEL_PATH),
-            "yolo_text_detect_v2": str(Config.YOLO_TEXT_V2_MODEL_PATH),
-            "yolo_corner_detect": str(Config.YOLO_CORNER_MODEL_PATH)
-        }
-
+        self.local_weights = self.config.get_model_paths()
+        
+        if self.config.MLFLOW_ENABLED:
+            mlflow.set_tracking_uri(self.config.MLFLOW_TRACKING_URI)
+            
         self._load_all_models()
 
-    def _download_yolo_weight_from_mlflow(self, model_key: str):
-        """Download YOLO model weights from MLflow using run_id and artifact_path."""
-        artifact_info = self.mlflow_model_artifacts.get(model_key.replace("_detect", ""), None)
-        if not artifact_info:
-            return None
-        run_id = artifact_info.get("run_id")
-        artifact_path = artifact_info.get("artifact_path")
-        if not run_id or not artifact_path:
-            return None
-        try:
-            local_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path=artifact_path)
-            return local_path
-        except Exception as e:
-            st.warning(f"Could not download {model_key} from MLflow: {e}")
-            return None
+    def _get_model_weights_path(self, model_key: str, download_dir: str = "./.temp", model_version: str = "1") -> str:
+        """
+        Get model weights path, trying MLflow first then falling back to local.
+        
+        Args:
+            model_key (str): Key identifying the model (e.g., 'yolo_text', 'yolo_corner')
+            download_dir (str): Directory to store downloaded weights, defaults to './.temp'
+            model_version (str): Version of the model to download, defaults to 1
+            
+        Returns:
+            str: Path to model weights file
+            
+        Raises:
+            FileNotFoundError: If no weights found in MLflow or locally
+        """
+        # Create model-specific download directory to avoid conflicts
+        model_download_dir = Path(download_dir) / model_key
+        model_download_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Try MLflow first if enabled
+        if self.config.MLFLOW_ENABLED:
+            client = mlflow.tracking.MlflowClient()
+            try:
+                # Get artifact info from config
+                artifact_info = self.config.MLFLOW_MODEL_ARTIFACTS.get(model_key)
+                if artifact_info:
+                    version = artifact_info.get("version", model_version)
+                    artifact_path = artifact_info.get("artifact_path", "").rstrip("/")
+                    
+                    # Get run ID from model version
+                    model_version = client.get_model_version(model_key, version)
+                    version_run_id = model_version.run_id
+                    print(f"Found run ID {version_run_id} for {model_key} version {version}")
+                    
+                    # Download using run ID and artifact path to model-specific directory
+                    download_path = mlflow.artifacts.download_artifacts(
+                        run_id=version_run_id,
+                        artifact_path=artifact_path,
+                        dst_path=str(model_download_dir)
+                    )
+                    
+                    # Handle both file and directory downloads
+                    download_path = Path(download_path)
+                    if download_path.is_dir():
+                        # Search for the specific model file
+                        expected_name = Path(artifact_path).name
+                        if expected_name:
+                            model_file = download_path / expected_name
+                            if model_file.exists() and model_file.suffix == '.pt':
+                                print(f"Using MLflow weights: {model_file}")
+                                return str(model_file)
+                        
+                        # Fallback to searching for any .pt file
+                        pt_files = list(download_path.glob("*.pt"))
+                        if pt_files:
+                            model_path = str(pt_files[0])
+                            print(f"Using MLflow weights from directory: {model_path}")
+                            return model_path
+                    elif download_path.suffix == '.pt':
+                        print(f"Using MLflow weights: {download_path}")
+                        return str(download_path)
+                    
+            except Exception as e:
+                print(f"MLflow download failed for {model_key}: {e}")
+
+        # Fallback to local weights
+        local_path = Path(self.local_weights[model_key])
+        if local_path.exists():
+            print(f"Using local weights: {local_path}")
+            return str(local_path)
+        
+        raise FileNotFoundError(f"No weights found for {model_key} in MLflow or locally")
 
     def _load_all_models(self):
         """Load all required models."""
         self.models['vietocr'] = self._load_vietocr_model()
-        self.models['yolo_text_detect'] = self._load_yolo_model('yolo_text_detect')
-        self.models['yolo_text_detect_v2'] = self._load_yolo_model('yolo_text_detect_v2')
-        self.models['yolo_corner_detect'] = [self._load_yolo_model('yolo_corner_detect')]
+        self.models['yolo_text_detect'] = self._load_yolo_text_detection_model()
+        self.models['yolo_text_detect_v2'] = self._load_yolo_text_detection_model_v2()
+        self.models['yolo_corner_detect'] = self._load_yolo_corner_detection_model()
         self.models['text_corrector'] = self._load_text_correction_model()
         if self.api_key:
             self.models['gemini_client'] = self._load_gemini_client()
@@ -77,29 +125,40 @@ class ModelManager:
             st.error(f"Error loading VietOCR model: {e}")
             return None
 
-    def _load_yolo_model(self, model_key: str):
-        """Load YOLO model from MLflow run artifact or fallback to local file."""
-        # Try MLflow first
-        if self.mlflow_enabled:
-            weight_path = self._download_yolo_weight_from_mlflow(model_key)
-            if weight_path and Path(weight_path).exists():
-                try:
-                    model = YOLO(str(weight_path))
-                    model.to(self.device)
-                    return model
-                except Exception as e:
-                    st.warning(f"Could not load {model_key} from MLflow artifact: {e}")
-
-        # Fallback to local file
+    @st.cache_resource
+    def _load_yolo_text_detection_model(_self):
+        """Load YOLO model for text detection."""
         try:
-            local_path = Path(self.local_weights.get(model_key, ""))
-            if not local_path.exists():
-                raise FileNotFoundError(f"Local fallback weight not found: {local_path}")
-            model = YOLO(str(local_path))
-            model.to(self.device)
+            model_path = _self._get_model_weights_path("yolo_text")
+            model = YOLO(model_path)
+            model.to(_self.device)
             return model
         except Exception as e:
-            st.error(f"Failed to load {model_key} from both MLflow and local fallback: {e}")
+            st.error(f"Error loading YOLO text detection model: {e}")
+            return None
+
+    @st.cache_resource
+    def _load_yolo_text_detection_model_v2(_self):
+        """Load YOLO v2 model for text detection."""
+        try:
+            model_path = _self._get_model_weights_path("yolo_text_v2")
+            model = YOLO(model_path)
+            model.to(_self.device)
+            return model
+        except Exception as e:
+            st.error(f"Error loading YOLO text detection model v2: {e}")
+            return None
+
+    @st.cache_resource
+    def _load_yolo_corner_detection_model(_self):
+        """Load YOLO model for ID card corner detection."""
+        try:
+            model_path = _self._get_model_weights_path("yolo_corner")
+            model = YOLO(model_path)
+            model.to(_self.device)
+            return [model]  # Return as list for compatibility
+        except Exception as e:
+            st.error(f"Error loading YOLO corner detection model: {e}")
             return None
 
     @st.cache_resource
@@ -139,12 +198,12 @@ class ModelManager:
         """Reload a specific model."""
         if model_name == 'vietocr':
             self.models['vietocr'] = self._load_vietocr_model()
-        elif model_name in self.local_weights:
-            model = self._load_yolo_model(model_name)
-            if model_name == 'yolo_corner_detect':
-                self.models[model_name] = [model]
-            else:
-                self.models[model_name] = model
+        elif model_name == 'yolo_text_detect':
+            self.models['yolo_text_detect'] = self._load_yolo_text_detection_model()
+        elif model_name == 'yolo_text_detect_v2':
+            self.models['yolo_text_detect_v2'] = self._load_yolo_text_detection_model_v2()
+        elif model_name == 'yolo_corner_detect':
+            self.models['yolo_corner_detect'] = self._load_yolo_corner_detection_model()
         elif model_name == 'text_corrector':
             self.models['text_corrector'] = self._load_text_correction_model()
         elif model_name == 'gemini_client':

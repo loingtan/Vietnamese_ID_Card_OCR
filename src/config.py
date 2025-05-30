@@ -17,10 +17,15 @@ class Config:
     LOGS_DIR = BASE_DIR / "logs"
 
     # Model paths (for local fallback)
-    YOLO_CORNER_MODEL_PATH = BASE_DIR / "models" / "corner_detection" / "weights" / "29_03_25-YOLOv11n-Corner-best_metrics.pt"
-    YOLO_TEXT_MODEL_PATH = BASE_DIR / "models" / "text_detection" / "weights" / "best.pt"
-    YOLO_TEXT_V2_MODEL_PATH = BASE_DIR / "models" / "text_detection" / "weights" / "bestv2.pt"
+    YOLO_CORNER_MODEL_PATH = MODEL_DIR / "corner_detection" / "weights" / "29_03_25-YOLOv11n-Corner-best_metrics.pt"
+    YOLO_TEXT_MODEL_PATH = MODEL_DIR / "text_detection" / "weights" / "best.pt"
+    YOLO_TEXT_V2_MODEL_PATH = MODEL_DIR  / "text_detection" / "weights" / "bestv2.pt"
     DICTIONARY_PATH = BASE_DIR / "dictionary" / "dictionaries" / "hongocduc" / "words.txt"
+    # LOCAL_MODEL_WEIGHTS = {
+    #     "yolo_text": YOLO_TEXT_MODEL_PATH,
+    #     "yolo_text_v2": YOLO_TEXT_V2_MODEL_PATH,
+    #     "yolo_corner": YOLO_CORNER_MODEL_PATH
+    # }
 
     # API Configuration
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -47,25 +52,29 @@ class Config:
     # Logging Configuration
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    
+    # DVC
+    YOLO_CORNER_MODEL_DATASET =  MODEL_DIR / "corner_detection" / "datasets"
+    YOLO_TEXT_MODEL_DATASET = MODEL_DIR / "text_detection" / "datasets"
 
     # === MLflow Integration ===
     MLFLOW_ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
     MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
-    MLFLOW_EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "Manual-Upload")
-
-    # Map model keys to MLflow run ID + artifact path
     MLFLOW_MODEL_ARTIFACTS = {
         "yolo_text": {
+            "version": "1",
             "run_id": os.getenv("MLFLOW_RUN_YOLO_TEXT", ""),
-            "artifact_path": "models/best.pt"
+            "artifact_path": ""
         },
         "yolo_text_v2": {
+            "version": "1",
             "run_id": os.getenv("MLFLOW_RUN_YOLO_TEXT_V2", ""),
-            "artifact_path": "models/bestv2.pt"
+            "artifact_path": ""
         },
         "yolo_corner": {
+            "version": "1",
             "run_id": os.getenv("MLFLOW_RUN_YOLO_CORNER", ""),
-            "artifact_path": "models/29_03_25-YOLOv11n-Corner-best_metrics.pt"
+            "artifact_path": ""
         }
     }
 

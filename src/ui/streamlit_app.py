@@ -128,7 +128,7 @@ class StreamlitUI:
             col1, col2 = st.columns([1, 1])
             with col1:
                 st.subheader("📤 Uploaded Image")
-                st.image(image, use_column_width=True)
+                st.image(image, use_container_width=True)
 
             # Convert to numpy array for processing
             image_array = np.array(image)

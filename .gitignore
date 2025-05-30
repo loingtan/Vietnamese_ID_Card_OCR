@@ -1,6 +1,8 @@
 .venv/*
 .idea/*
 .vscode/*
+.*/
+!.dvc/
 # Python cache
 __pycache__/
 *.py[cod]
@@ -15,3 +17,6 @@ env/
 api.log
 mlruns
 mlartifacts
+models/*/datasets/test
+models/*/datasets/*.zip
+models/*/datasets/*.ipynb
