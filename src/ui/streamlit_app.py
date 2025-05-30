@@ -36,20 +36,6 @@ class StreamlitUI:
         """Setup sidebar with configuration options."""
         st.sidebar.title("⚙️ Configuration")
 
-        # API Key input
-        api_key = st.sidebar.text_input(
-            "Gemini API Key (Optional)",
-            type="password",
-            help="Enter your Google Gemini API key for enhanced processing"
-        )
-
-        # Model selection
-        processing_method = st.sidebar.selectbox(
-            "Processing Method",
-            ["Auto (Gemini + OCR)", "Traditional OCR Only", "Gemini Only"],
-            index=0
-        )
-
         # Advanced settings
         with st.sidebar.expander("Advanced Settings"):
             confidence_threshold = st.slider(
@@ -74,8 +60,7 @@ class StreamlitUI:
             )
 
         return {
-            'api_key': api_key,
-            'processing_method': processing_method,
+
             'confidence_threshold': confidence_threshold,
             'nms_threshold': nms_threshold,
             'enhance_image': enhance_image
@@ -103,15 +88,11 @@ class StreamlitUI:
         """)
 
         # Add some metrics or info
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2 = st.columns(2)
         with col1:
             st.metric("Supported Formats", "Old & New ID")
         with col2:
             st.metric("Languages", "Vietnamese")
-        with col3:
-            st.metric("Processing", "AI + OCR")
-        with col4:
-            st.metric("Accuracy", "95%+")
 
     def upload_image(self):
         """Handle image upload."""
@@ -128,7 +109,7 @@ class StreamlitUI:
             col1, col2 = st.columns([1, 1])
             with col1:
                 st.subheader("📤 Uploaded Image")
-                st.image(image, use_column_width=True)
+                st.image(image, use_container_width=True)
 
             # Convert to numpy array for processing
             image_array = np.array(image)
@@ -215,7 +196,7 @@ class StreamlitUI:
             ### Features:
             - ✅ Supports both old and new Vietnamese ID card formats
             - ✅ High accuracy Vietnamese text recognition
-            - ✅ Automatic perspective and orientation correction
+            - ✅ Automatuse_container_width=Trueic perspective and orientation correction
             - ✅ AI-powered information extraction with Gemini
             - ✅ Fallback to traditional OCR methods
             """)

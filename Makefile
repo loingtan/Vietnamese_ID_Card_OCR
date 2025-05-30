@@ -1,4 +1,4 @@
-s# Vietnamese ID Card OCR Makefile
+# Vietnamese ID Card OCR Makefile
 
 .PHONY: help install install-windows install-dev setup run-streamlit run-api test lint format clean docker-build docker-run
 
