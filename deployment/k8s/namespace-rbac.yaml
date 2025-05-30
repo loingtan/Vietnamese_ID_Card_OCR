@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vnidcard
+  labels:
+    app: vnidcard-app
+    environment: production
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vnidcard-service-account
+  namespace: vnidcard
+  labels:
+    app: vnidcard-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vnidcard-role
+  namespace: vnidcard
+  labels:
+    app: vnidcard-app
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vnidcard-role-binding
+  namespace: vnidcard
+  labels:
+    app: vnidcard-app
+subjects:
+  - kind: ServiceAccount
+    name: vnidcard-service-account
+    namespace: vnidcard
+roleRef:
+  kind: Role
+  name: vnidcard-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vnidcard-secrets
+  namespace: vnidcard
+  labels:
+    app: vnidcard-app
+type: Opaque
+data:
+  # Base64 encoded secrets (replace with actual values)
+  # echo -n "your-secret" | base64
+  mongodb-uri: bW9uZ29kYjovL2xvY2FsaG9zdDoyNzAxNy92bmlkY2FyZA== # mongodb://localhost:27017/vnidcard
+  api-key: eW91ci1hcGkta2V5LWhlcmU= # your-api-key-here

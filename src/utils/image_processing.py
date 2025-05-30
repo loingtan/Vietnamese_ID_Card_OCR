@@ -11,6 +11,16 @@ from qreader import QReader
 import torch
 from ensemble_boxes import weighted_boxes_fusion
 
+# Try to import config, fallback to a simple config if not available
+try:
+    from ..config import get_config
+    config = get_config()
+except ImportError:
+    # Fallback for testing
+    from types import SimpleNamespace
+    config = SimpleNamespace()
+    config.DEFAULT_CONFIDENCE_THRESHOLD = 0.5
+
 
 def apply_nms(boxes: np.ndarray, scores: Optional[np.ndarray] = None, nms_thresh: float = 0.3) -> List:
     """
@@ -59,18 +69,23 @@ def calculate_iou(box1: Tuple, box2: Tuple) -> float:
     Calculate Intersection over Union between two boxes.
 
     Args:
-        box1: First box as ((x1, y1), (x2, y2))
-        box2: Second box as ((x1, y1), (x2, y2))
+        box1: First box as (x1, y1, x2, y2) or ((x1, y1), (x2, y2))
+        box2: Second box as (x1, y1, x2, y2) or ((x1, y1), (x2, y2))
 
     Returns:
         IoU value between 0 and 1
     """
-    # Convert to [x1, y1, x2, y2] format
-    x1_1, y1_1 = box1[0]
-    x2_1, y2_1 = box1[1]
-
-    x1_2, y1_2 = box2[0]
-    x2_2, y2_2 = box2[1]
+    # Handle both formats: (x1, y1, x2, y2) and ((x1, y1), (x2, y2))
+    if len(box1) == 4:
+        # Flat format: (x1, y1, x2, y2)
+        x1_1, y1_1, x2_1, y2_1 = box1
+        x1_2, y1_2, x2_2, y2_2 = box2
+    else:
+        # Nested format: ((x1, y1), (x2, y2))
+        x1_1, y1_1 = box1[0]
+        x2_1, y2_1 = box1[1]
+        x1_2, y1_2 = box2[0]
+        x2_2, y2_2 = box2[1]
 
     x_left = max(x1_1, x1_2)
     y_top = max(y1_1, y1_2)
@@ -422,7 +437,6 @@ def four_point_transform(image, pts):
     heightB = np.linalg.norm(tl - bl)  # Left height
     maxHeight = int(max(heightA, heightB))
 
- 
     dst = np.array([
         [0, maxHeight - 1],             # bottom-left
         [maxWidth - 1, maxHeight - 1],  # bottom-right
