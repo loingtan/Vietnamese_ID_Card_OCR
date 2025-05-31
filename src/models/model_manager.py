@@ -13,15 +13,34 @@ from pathlib import Path
 import os
 import mlflow
 from src.config import get_config
+# Import the new configuration system
+try:
+    from ...config.settings import get_config
+    CONFIG_AVAILABLE = True
+except ImportError:
+    # Fallback for legacy imports
+    CONFIG_AVAILABLE = False
+
 
 class ModelManager:
     """Manages all models used in the Vietnamese ID Card OCR system."""
 
-    def __init__(self, api_key: str = None):
-        self.config = get_config()
+    def __init__(self, api_key: str = None, config=None):
+        if CONFIG_AVAILABLE and config is None:
+            self.config = get_config()
+        else:
+            self.config = config
+
+        # Set device based on config or auto-detection
+        if hasattr(self.config, 'models') and self.config.models.device != "auto":
+            self.device = self.config.models.device
+        else:
+            self.config = get_config()
         self.device = "cuda" if torch.cuda.is_available() and not self.config.FORCE_CPU else "cpu"
+
         self.models = {}
-        self.api_key = api_key
+        self.api_key = api_key or (self.config.google_ai_api_key if hasattr(
+            self.config, 'google_ai_api_key') else None)
         self.local_weights = self.config.get_model_paths()
         
         if self.config.MLFLOW_ENABLED:

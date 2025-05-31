@@ -1,0 +1,208 @@
+groups:
+  - name: vnidcard_api_alerts
+    rules:
+      # High Error Rate Alert
+      - alert: HighErrorRate
+        expr: (rate(error_count_total[5m]) / rate(request_count_total[5m])) * 100 > 50
+        for: 2m
+        labels:
+          severity: critical
+          service: vnidcard-api
+        annotations:
+          summary: "High error rate detected in Vietnamese ID Card API"
+          description: "Error rate is {{ $value }}% for the last 5 minutes, which is above 50% threshold"
+
+      # Low Confidence Score Alert
+      - alert: LowConfidenceScore
+        expr: avg_over_time(confidence_score[5m]) < 0.6
+        for: 2m
+        labels:
+          severity: warning
+          service: vnidcard-api
+        annotations:
+          summary: "Low confidence score detected in Vietnamese ID Card API"
+          description: "Average confidence score is {{ $value }} for the last 5 minutes, which is below 0.6 threshold"
+
+      # High Latency Alert
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(processing_time_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: vnidcard-api
+        annotations:
+          summary: "High latency detected in Vietnamese ID Card API"
+          description: "95th percentile latency is {{ $value }}s for the last 5 minutes, which is above 10s threshold"
+
+      # API Service Down Alert
+      - alert: APIServiceDown
+        expr: up{job="vnidcard-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: vnidcard-api
+        annotations:
+          summary: "Vietnamese ID Card API service is down"
+          description: "The Vietnamese ID Card API service has been down for more than 1 minute"
+
+      # Low Request Rate (Potential Issue)
+      - alert: LowRequestRate
+        expr: rate(request_count_total[5m]) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: vnidcard-api
+        annotations:
+          summary: "Low request rate detected in Vietnamese ID Card API"
+          description: "Request rate is {{ $value }} requests/second for the last 5 minutes, which is below expected threshold"
+
+  - name: system_alerts
+    rules:
+      # High CPU Usage Alert
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value }}% on instance {{ $labels.instance }}"
+
+      # High Memory Usage Alert
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value }}% on instance {{ $labels.instance }}"
+
+      # Low Disk Space Alert
+      - alert: LowDiskSpace
+        expr: (1 - (node_filesystem_free_bytes / node_filesystem_size_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Low disk space detected"
+          description: "Disk usage is {{ $value }}% on instance {{ $labels.instance }}, mount point {{ $labels.mountpoint }}"
+
+      # High Disk IO Alert
+      - alert: HighDiskIO
+        expr: rate(node_disk_io_time_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High disk I/O detected"
+          description: "Disk I/O utilization is {{ $value }} on instance {{ $labels.instance }}, device {{ $labels.device }}"
+
+      # High Network IO Alert
+      - alert: HighNetworkIO
+        expr: rate(node_network_receive_bytes_total[5m]) + rate(node_network_transmit_bytes_total[5m]) > 100000000 # 100MB/s
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High network I/O detected"
+          description: "Network I/O is {{ $value }} bytes/second on instance {{ $labels.instance }}, interface {{ $labels.device }}"
+
+  - name: gpu_alerts
+    rules:
+      # High GPU Usage Alert
+      - alert: HighGPUUsage
+        expr: nvidia_gpu_utilization_percent > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: gpu
+        annotations:
+          summary: "High GPU usage detected"
+          description: "GPU usage is {{ $value }}% on GPU {{ $labels.gpu }}"
+
+      # High GPU Temperature Alert
+      - alert: HighGPUTemperature
+        expr: nvidia_gpu_temperature_celsius > 80
+        for: 5m
+        labels:
+          severity: critical
+          service: gpu
+        annotations:
+          summary: "High GPU temperature detected"
+          description: "GPU temperature is {{ $value }}°C on GPU {{ $labels.gpu }}"
+
+      # Low GPU Memory Available Alert
+      - alert: LowGPUMemory
+        expr: (nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: gpu
+        annotations:
+          summary: "Low GPU memory available"
+          description: "GPU memory usage is {{ $value }}% on GPU {{ $labels.gpu }}"
+
+  - name: model_performance_alerts
+    rules:
+      # Slow Inference Speed Alert
+      - alert: SlowInferenceSpeed
+        expr: avg_over_time(inference_time_seconds[5m]) > 5
+        for: 3m
+        labels:
+          severity: warning
+          service: vnidcard-model
+        annotations:
+          summary: "Slow inference speed detected"
+          description: "Average inference time is {{ $value }}s for the last 5 minutes, which is above 5s threshold"
+
+      # Model Loading Failure Alert
+      - alert: ModelLoadingFailure
+        expr: model_loading_status == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: vnidcard-model
+        annotations:
+          summary: "Model loading failure detected"
+          description: "Model {{ $labels.model_name }} failed to load"
+
+  - name: container_alerts
+    rules:
+      # Container Down Alert
+      - alert: ContainerDown
+        expr: container_last_seen{name=~"vnidcard.*"} < time() - 60
+        for: 1m
+        labels:
+          severity: critical
+          service: container
+        annotations:
+          summary: "Container is down"
+          description: "Container {{ $labels.name }} has been down for more than 1 minute"
+
+      # High Container CPU Usage Alert
+      - alert: HighContainerCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{name=~"vnidcard.*"}[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: container
+        annotations:
+          summary: "High container CPU usage"
+          description: "Container {{ $labels.name }} CPU usage is {{ $value }}%"
+
+      # High Container Memory Usage Alert
+      - alert: HighContainerMemoryUsage
+        expr: (container_memory_usage_bytes{name=~"vnidcard.*"} / container_spec_memory_limit_bytes) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: container
+        annotations:
+          summary: "High container memory usage"
+          description: "Container {{ $labels.name }} memory usage is {{ $value }}%"

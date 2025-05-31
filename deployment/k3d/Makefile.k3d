@@ -1,0 +1,161 @@
+# Makefile for Vietnamese ID Card OCR K3D Deployment
+
+.PHONY: help install-deps check-deps create-cluster delete-cluster build push deploy undeploy restart logs status clean all
+
+# Configuration
+CLUSTER_NAME ?= vnidcard-cluster
+REGISTRY_NAME ?= vnidcard-registry
+REGISTRY_PORT ?= 5000
+APP_NAME ?= vnidcard-app
+NAMESPACE ?= default
+IMAGE_TAG ?= latest
+
+# Colors for output
+RED := \033[0;31m
+GREEN := \033[0;32m
+YELLOW := \033[1;33m
+NC := \033[0m # No Color
+
+help: ## Show this help message
+	@echo "Vietnamese ID Card OCR - K3D Deployment"
+	@echo "========================================"
+	@echo ""
+	@echo "Available targets:"
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+install-deps: ## Install required dependencies (k3d, kubectl, docker)
+	@echo "$(YELLOW)Installing dependencies...$(NC)"
+	@if ! command -v k3d >/dev/null 2>&1; then \
+		echo "$(RED)k3d not found. Please install it from https://k3d.io/$(NC)"; \
+		exit 1; \
+	fi
+	@if ! command -v kubectl >/dev/null 2>&1; then \
+		echo "$(RED)kubectl not found. Please install it$(NC)"; \
+		exit 1; \
+	fi
+	@if ! command -v docker >/dev/null 2>&1; then \
+		echo "$(RED)docker not found. Please install it$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)All dependencies are installed$(NC)"
+
+check-deps: ## Check if all dependencies are installed
+	@echo "$(YELLOW)Checking dependencies...$(NC)"
+	@k3d version
+	@kubectl version --client
+	@docker --version
+	@echo "$(GREEN)Dependencies check passed$(NC)"
+
+create-cluster: ## Create k3d cluster with registry
+	@echo "$(YELLOW)Creating k3d cluster...$(NC)"
+	@k3d cluster create --config k3d-config.yaml
+	@echo "$(GREEN)Cluster created successfully$(NC)"
+
+delete-cluster: ## Delete k3d cluster
+	@echo "$(YELLOW)Deleting k3d cluster...$(NC)"
+	@k3d cluster delete $(CLUSTER_NAME)
+	@k3d registry delete $(REGISTRY_NAME) || true
+	@echo "$(GREEN)Cluster deleted$(NC)"
+
+build: ## Build Docker image
+	@echo "$(YELLOW)Building Docker image...$(NC)"
+	@docker build -t $(APP_NAME):$(IMAGE_TAG) .
+	@docker tag $(APP_NAME):$(IMAGE_TAG) localhost:$(REGISTRY_PORT)/$(APP_NAME):$(IMAGE_TAG)
+	@echo "$(GREEN)Image built successfully$(NC)"
+
+push: ## Push Docker image to local registry
+	@echo "$(YELLOW)Pushing image to registry...$(NC)"
+	@docker push localhost:$(REGISTRY_PORT)/$(APP_NAME):$(IMAGE_TAG)
+	@echo "$(GREEN)Image pushed successfully$(NC)"
+
+deploy: ## Deploy application to k3d cluster
+	@echo "$(YELLOW)Deploying application...$(NC)"
+	@kubectl apply -f namespace-rbac.yaml
+	@kubectl apply -f persistent-volumes.yaml
+	@kubectl apply -f deployment.yaml
+	@kubectl apply -f service.yaml
+	@kubectl apply -f ingress.yaml
+	@kubectl apply -f autoscaling.yaml
+	@kubectl wait --for=condition=available --timeout=300s deployment/$(APP_NAME)
+	@echo "$(GREEN)Application deployed successfully$(NC)"
+
+undeploy: ## Remove application from k3d cluster
+	@echo "$(YELLOW)Removing application...$(NC)"
+	@kubectl delete -f autoscaling.yaml --ignore-not-found=true
+	@kubectl delete -f ingress.yaml --ignore-not-found=true
+	@kubectl delete -f service.yaml --ignore-not-found=true
+	@kubectl delete -f deployment.yaml --ignore-not-found=true
+	@kubectl delete -f persistent-volumes.yaml --ignore-not-found=true
+	@kubectl delete -f namespace-rbac.yaml --ignore-not-found=true
+	@echo "$(GREEN)Application removed$(NC)"
+
+restart: ## Restart the application
+	@echo "$(YELLOW)Restarting application...$(NC)"
+	@kubectl rollout restart deployment/$(APP_NAME)
+	@kubectl rollout status deployment/$(APP_NAME)
+	@echo "$(GREEN)Application restarted$(NC)"
+
+logs: ## Show application logs
+	@echo "$(YELLOW)Showing application logs...$(NC)"
+	@kubectl logs -l app=$(APP_NAME) -f --tail=100
+
+status: ## Show cluster and application status
+	@echo "$(YELLOW)Cluster and application status:$(NC)"
+	@echo ""
+	@echo "=== CLUSTER INFO ==="
+	@kubectl cluster-info
+	@echo ""
+	@echo "=== NODES ==="
+	@kubectl get nodes -o wide
+	@echo ""
+	@echo "=== NAMESPACES ==="
+	@kubectl get namespaces
+	@echo ""
+	@echo "=== PODS ==="
+	@kubectl get pods -o wide
+	@echo ""
+	@echo "=== SERVICES ==="
+	@kubectl get services -o wide
+	@echo ""
+	@echo "=== DEPLOYMENTS ==="
+	@kubectl get deployments -o wide
+	@echo ""
+	@echo "=== INGRESS ==="
+	@kubectl get ingress
+	@echo ""
+	@echo "$(GREEN)Access URLs:$(NC)"
+	@echo "- Streamlit App: http://localhost:8501"
+	@echo "- API: http://localhost:8080"
+	@echo "- Registry: http://localhost:5000"
+
+clean: ## Clean up everything (cluster, images, volumes)
+	@echo "$(YELLOW)Cleaning up everything...$(NC)"
+	@make undeploy || true
+	@make delete-cluster || true
+	@docker system prune -f
+	@echo "$(GREEN)Cleanup completed$(NC)"
+
+all: check-deps create-cluster build push deploy status ## Full deployment process
+
+# Development shortcuts
+dev-deploy: build push restart ## Quick redeploy for development
+dev-logs: ## Show logs for development
+	@kubectl logs -l app=$(APP_NAME) -f --tail=50
+
+dev-shell: ## Get shell access to running pod
+	@kubectl exec -it $$(kubectl get pods -l app=$(APP_NAME) -o jsonpath='{.items[0].metadata.name}') -- /bin/bash
+
+# Monitoring
+monitor: ## Show resource usage
+	@kubectl top nodes
+	@kubectl top pods
+
+scale: ## Scale application (usage: make scale REPLICAS=3)
+	@kubectl scale deployment $(APP_NAME) --replicas=$(REPLICAS)
+	@kubectl rollout status deployment/$(APP_NAME)
+
+# Testing
+test-connection: ## Test application connectivity
+	@echo "$(YELLOW)Testing application connectivity...$(NC)"
+	@curl -f http://localhost:8501 || echo "$(RED)Streamlit not accessible$(NC)"
+	@curl -f http://localhost:8080/health || echo "$(RED)API not accessible$(NC)"

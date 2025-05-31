@@ -1,0 +1,53 @@
+# k3d cluster configuration
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: vnidcard-cluster
+servers: 1
+agents: 2
+kubeAPI:
+  host: "vnidcard.local"
+  hostIP: "127.0.0.1"
+  hostPort: "6550"
+image: rancher/k3s:v1.28.8-k3s1
+token: vnidcard-secret
+volumes:
+  - volume: c:\Users\09398\PycharmProjects\VnId-Card:/app
+    nodeFilters:
+      - server:0
+      - agent:*
+ports:
+  - port: 8080:80
+    nodeFilters:
+      - loadbalancer
+  - port: 8501:8501
+    nodeFilters:
+      - loadbalancer  - port: 5001:5001
+    nodeFilters:
+      - server:0
+env:
+  - envVar: bar=baz
+    nodeFilters:
+      - server:0
+registries:  create:
+    name: vnidcard-registry
+    host: "0.0.0.0"
+    hostPort: "5001"
+  config: |
+    mirrors:
+      "vnidcard-registry:5001":
+        endpoint:
+          - http://vnidcard-registry:5001
+options:
+  k3d:
+    wait: true
+    timeout: "60s"
+    disableLoadbalancer: false
+  k3s:
+    extraArgs:
+      - arg: --tls-san=vnidcard.local
+        nodeFilters:
+          - server:*
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true

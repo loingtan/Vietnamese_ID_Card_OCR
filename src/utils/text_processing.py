@@ -8,6 +8,16 @@ from pathlib import Path
 from langdetect import detect, LangDetectException
 from Levenshtein import distance as levenshtein_distance
 
+# Try to import config, fallback to a simple config if not available
+try:
+    from ..config import get_config
+    config = get_config()
+except ImportError:
+    # Fallback for testing
+    from types import SimpleNamespace
+    config = SimpleNamespace()
+    config.DEFAULT_CONFIDENCE_THRESHOLD = 0.5
+
 
 def load_vietnamese_dictionary(dict_path: str = r'dictionary\dictionaries\hongocduc\words.txt') -> Set[str]:
     """
@@ -130,16 +140,16 @@ def extract_gender(text: str) -> Optional[str]:
     """
     text_lower = text.lower()
 
-    male_terms = ['nam', 'male', 'giới tính: nam']
+    # Check female terms first to avoid 'female' matching 'male'
     female_terms = ['nữ', 'female', 'giới tính: nữ']
-
-    for term in male_terms:
-        if term in text_lower:
-            return "Nam"
-
     for term in female_terms:
         if term in text_lower:
             return "Nữ"
+
+    male_terms = ['nam', 'male', 'giới tính: nam']
+    for term in male_terms:
+        if term in text_lower:
+            return "Nam"
 
     return None
 
