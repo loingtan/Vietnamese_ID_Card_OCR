@@ -23,6 +23,7 @@ services:  # Main API Application
       - ../../data/uploads:/app/data/uploads
       - ../../data/outputs:/app/data/outputs
       - ../../config/.env:/app/config/.env:ro
+      
     networks:
       - vnidcard-network
     healthcheck:
@@ -125,14 +126,15 @@ services:  # Main API Application
     profiles: ["monitoring"]
 
   # Fluent Bit - Log Collection
+    # Fluent Bit - Log Collection
   fluent-bit:
     image: fluent/fluent-bit:2.2.0
     container_name: vnidcard-fluent-bit
     volumes:
       - ../../monitor/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
       - ../../monitor/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf
-      - ../../logs:/var/log/app:ro
-      - /var/log:/var/log:ro
+      - ../../logs:/app/logs:ro  # Đổi đường dẫn mount
+      - /var/log:/host/var/log:ro  # Đổi đường dẫn mount để tránh conflict
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /sys:/host/sys:ro
       - /proc:/host/proc:ro
@@ -166,7 +168,7 @@ services:  # Main API Application
 
   # cAdvisor - Container Metrics
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.48.1
+    image: gcr.io/cadvisor/cadvisor
     container_name: vnidcard-cadvisor
     ports:
       - "8083:8080"

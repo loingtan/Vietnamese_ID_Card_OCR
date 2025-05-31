@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image
 import io
 import logging
+import sys
 from prometheus_client import Counter, Histogram, Gauge, start_http_server, generate_latest, CONTENT_TYPE_LATEST
 from fastapi import Response
 import time
@@ -33,20 +34,36 @@ try:
     from ..webhooks.alert_handlers import router as alert_router
     from ..config import get_config
 except ImportError:
-    from models.model_manager import ModelManager
-    from core.id_card_processor import IDCardProcessor
-    from webhooks.alert_handlers import router as alert_router
-    from config import get_config
+    from src.models.model_manager import ModelManager
+    from src.core.id_card_processor import IDCardProcessor
+    from src.webhooks.alert_handlers import router as alert_router
+    from src.config import get_config
 
 # Load configuration
 config = get_config()
+
+# Fix Windows console encoding for Vietnamese characters
+if sys.platform == "win32":
+    try:
+        # Set console to UTF-8 mode on Windows
+        import locale
+        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+    except (locale.Error, ImportError):
+        try:
+            # Alternative approach for Windows
+            import codecs
+            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
+            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
+        except Exception:
+            # If all else fails, we'll rely on the safe logging approach
+            pass
 
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
     format=config.LOG_FORMAT,
     handlers=[
-        logging.FileHandler(config.LOGS_DIR / "api.log"),
+        logging.FileHandler(config.LOGS_DIR / "api.log", encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -93,14 +110,28 @@ NETWORK_BYTES_RECV = Counter(
 # Enhanced Logging configuration with multiple handlers
 os.makedirs('logs', exist_ok=True)
 
+# Configure stream handler with UTF-8 encoding for Windows
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+
+# Configure file handlers with UTF-8 encoding
+file_handler = logging.FileHandler('logs/api.log', encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+
+error_file_handler = logging.FileHandler(
+    'logs/error.log', mode='a', encoding='utf-8')
+error_file_handler.setLevel(logging.ERROR)
+error_file_handler.setFormatter(file_formatter)
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/api.log'),
-        logging.FileHandler('logs/error.log', mode='a'),
-        logging.StreamHandler()
-    ]
+    handlers=[file_handler, error_file_handler, console_handler]
 )
 
 # Create specialized loggers
@@ -114,16 +145,16 @@ if not GPU_AVAILABLE:
     logger.warning("GPUtil not available. GPU metrics will be disabled.")
 
 # Set error logger to only log errors to error.log
-error_handler = logging.FileHandler('logs/error.log')
+error_handler = logging.FileHandler('logs/error.log', encoding='utf-8')
 error_handler.setLevel(logging.ERROR)
 error_logger.addHandler(error_handler)
 
 # Set model logger for model-specific logs
-model_handler = logging.FileHandler('logs/model.log')
+model_handler = logging.FileHandler('logs/model.log', encoding='utf-8')
 model_logger.addHandler(model_handler)
 
 # Set metrics logger for metrics-specific logs
-metrics_handler = logging.FileHandler('logs/metrics.log')
+metrics_handler = logging.FileHandler('logs/metrics.log', encoding='utf-8')
 metrics_logger.addHandler(metrics_handler)
 
 
@@ -269,7 +300,7 @@ class IDCardAPI:
                         detail="Could not decode image file"
                     )
 
-                # Process image with detailed metrics
+                logger.info(f"Processing file: {file.filename}")
                 inference_start = time.time()
                 result = self.processor.process_id_card(image)
                 inference_time = time.time() - inference_start
@@ -402,9 +433,9 @@ class IDCardAPI:
         @self.app.on_event("shutdown")
         async def shutdown_event():
             """Handle application shutdown."""
-            logger.info("Shutting down Vietnamese ID Card API")
-
-            # Stop system metrics collection
+            logger.info(
+                # Stop system metrics collection
+                "Shutting down Vietnamese ID Card API")
             self.metrics_collector.stop_collection()
 
             logger.info("API shutdown completed")
@@ -423,18 +454,35 @@ class IDCardAPI:
             "success": result.get('status') == 'success' if result else False
         }
 
-        # Log to different loggers based on content
-        if result and result.get('status') == 'success':
-            logger.info(
-                f"Prediction: {json.dumps(log_entry, ensure_ascii=False)}")
-        else:
-            error_logger.error(
-                f"Failed prediction: {json.dumps(log_entry, ensure_ascii=False)}")
+        try:
+            # Log to different loggers based on content
+            if result and result.get('status') == 'success':
+                logger.info(
+                    f"Prediction: {json.dumps(log_entry, ensure_ascii=False, indent=None)}")
+            else:
+                error_logger.error(
+                    f"Failed prediction: {json.dumps(log_entry, ensure_ascii=False, indent=None)}")
 
-        # Log model-specific metrics
-        model_logger.info(
-            # Store in feature store (for demo purposes)
-            f"Model inference - Time: {inference_time:.3f}s, Confidence: {confidence:.3f}, File: {filename}")
+            # Log model-specific metrics
+            model_logger.info(
+                f"Model inference - Time: {inference_time:.3f}s, Confidence: {confidence:.3f}, File: {filename}")
+
+        except UnicodeEncodeError as e:
+            # Fallback logging with ASCII encoding if Unicode fails
+            logger.warning(f"Unicode encoding error in logging: {e}")
+            safe_log_entry = {
+                "timestamp": log_entry["timestamp"],
+                "filename": filename,
+                "inference_time": inference_time,
+                "confidence": confidence,
+                "model_version": "1.0.0",
+                "success": log_entry["success"],
+                "unicode_error": "Vietnamese text removed due to encoding issues"
+            }
+            logger.info(
+                f"Prediction (safe): {json.dumps(safe_log_entry, ensure_ascii=True)}")
+
+        # Store in feature store (for demo purposes)
         self.feature_store[datetime.now().isoformat()] = log_entry
 
     def run(self, host: str = "0.0.0.0", port: int = 8080, metrics_port: int = 8000):
