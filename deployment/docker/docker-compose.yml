@@ -1,58 +1,43 @@
-version: '3.8'
+# Complete Vietnamese ID Card OCR Stack
+# Includes: API Application, Database, and Full Monitoring Stack
 
-services:
-  # API Service
+services:  # Main API Application
   vnid-api:
     build: 
       context: ../../
       dockerfile: deployment/docker/Dockerfile
+    container_name: vnidcard-api
     ports:
-      - "8000:8000"  # API
-      - "9090:9090"  # Metrics
+      - "8080:8080"  # API
+      - "8000:8000"  # Metrics
     environment:
       - ENVIRONMENT=production
       - API_HOST=0.0.0.0
-      - API_PORT=8000
-      - METRICS_PORT=9090
+      - API_PORT=8080
+      - METRICS_PORT=8000
       - LOG_LEVEL=INFO
+      - ENABLE_STREAMLIT=false
     volumes:
       - ../../logs:/app/logs
       - ../../data/models:/app/data/models
       - ../../data/uploads:/app/data/uploads
       - ../../data/outputs:/app/data/outputs
-      - ../../config/.env:/app/.env:ro
+      - ../../config/.env:/app/config/.env:ro
+    networks:
+      - vnidcard-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
     restart: unless-stopped
-
-  # Streamlit UI Service
-  vnid-streamlit:
-    build: 
-      context: ../../
-      dockerfile: deployment/docker/Dockerfile
-    command: ["streamlit", "run", "streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
-    ports:
-      - "8501:8501"
-    environment:
-      - ENVIRONMENT=production
-      - STREAMLIT_HOST=0.0.0.0
-      - STREAMLIT_PORT=8501
-    volumes:
-      - ../../logs:/app/logs
-      - ../../data/models:/app/data/models
-      - ../../data/uploads:/app/data/uploads
-      - ../../data/outputs:/app/data/outputs
-      - ../../config/.env:/app/.env:ro
     depends_on:
-      - vnid-api
-    restart: unless-stopped
+      - mongodb
 
-  # MongoDB (optional database)
+  # Database
   mongodb:
     image: mongo:7
+    container_name: vnidcard-mongodb
     ports:
       - "27017:27017"
     environment:
@@ -60,35 +45,166 @@ services:
     volumes:
       - mongodb_data:/data/db
       - ../../logs:/var/log/mongodb
+    networks:
+      - vnidcard-network
     restart: unless-stopped
-    profiles: ["database"]
 
-  # Prometheus (optional monitoring)
+  # Prometheus - Metrics Collection
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.48.0
+    container_name: vnidcard-prometheus
     ports:
-      - "9091:9090"
+      - "9090:9090"
     volumes:
-      - ../../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ../../monitoring/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml
+      - ../../monitor/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../../monitor/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml
+      - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
       - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - vnidcard-network
     restart: unless-stopped
     profiles: ["monitoring"]
 
-  # Grafana (optional monitoring)
+  # Grafana - Visualization Dashboard
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:10.2.0
+    container_name: vnidcard-grafana
     ports:
       - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
-      - grafana-storage:/var/lib/grafana
+      - grafana-data:/var/lib/grafana
+      - ../../monitor/grafana/provisioning:/etc/grafana/provisioning
+      - ../../monitor/grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=vnidcard123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+    networks:
+      - vnidcard-network
     restart: unless-stopped
     profiles: ["monitoring"]
 
+  # Alertmanager - Alert Handling
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: vnidcard-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ../../monitor/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - vnidcard-network
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+  # Loki - Log Aggregation
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: vnidcard-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ../../monitor/loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - vnidcard-network
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+  # Fluent Bit - Log Collection
+  fluent-bit:
+    image: fluent/fluent-bit:2.2.0
+    container_name: vnidcard-fluent-bit
+    volumes:
+      - ../../monitor/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
+      - ../../monitor/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf
+      - ../../logs:/var/log/app:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /sys:/host/sys:ro
+      - /proc:/host/proc:ro
+    environment:
+      - HOST_PROC=/host/proc
+      - HOST_SYS=/host/sys
+    networks:
+      - vnidcard-network
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+  # Node Exporter - System Metrics
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: vnidcard-node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - vnidcard-network
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+  # cAdvisor - Container Metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.48.1
+    container_name: vnidcard-cadvisor
+    ports:
+      - "8083:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    networks:
+      - vnidcard-network
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+  # GPU Metrics (NVIDIA GPU support)
+  nvidia-gpu-exporter:
+    image: mindprince/nvidia_gpu_prometheus_exporter:0.1
+    container_name: vnidcard-gpu-exporter
+    ports:
+      - "9445:9445"
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    networks:
+      - vnidcard-network
+    restart: unless-stopped
+    profiles: ["gpu", "monitoring"]
+
 volumes:
-  grafana-storage:
+  mongodb_data:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:
+  loki-data:
+
+networks:
+  vnidcard-network:
+    driver: bridge

@@ -7,13 +7,13 @@ metadata:
 spec:
   type: LoadBalancer
   ports:
-    - name: streamlit
-      port: 8501
-      targetPort: 8501
-      protocol: TCP
     - name: api
       port: 8080
       targetPort: 8080
+      protocol: TCP
+    - name: metrics
+      port: 8000
+      targetPort: 8000
       protocol: TCP
   selector:
     app: vnidcard-app
@@ -27,15 +27,15 @@ metadata:
 spec:
   type: NodePort
   ports:
-    - name: streamlit
-      port: 8501
-      targetPort: 8501
-      nodePort: 30501
-      protocol: TCP
     - name: api
       port: 8080
       targetPort: 8080
       nodePort: 30080
+      protocol: TCP
+    - name: metrics
+      port: 8000
+      targetPort: 8000
+      nodePort: 30000
       protocol: TCP
   selector:
     app: vnidcard-app

@@ -1,0 +1,4 @@
+Failed prediction: {"timestamp": "2025-05-31T14:01:31.192051", "filename": "613_jpg.rf.2ba5da47e2c02d535c465c9c247b8e12.jpg", "inference_time": 0.05001473426818848, "confidence": 0.0, "result": {"status": "error", "message": "'NoneType' object is not iterable", "extracted_info": {}}, "model_version": "1.0.0", "success": false}
+Failed prediction for 613_jpg.rf.2ba5da47e2c02d535c465c9c247b8e12.jpg: Unknown error
+Failed prediction: {"timestamp": "2025-05-31T14:01:39.703244", "filename": "9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg", "inference_time": 0.05252408981323242, "confidence": 0.0, "result": {"status": "error", "message": "'NoneType' object is not iterable", "extracted_info": {}}, "model_version": "1.0.0", "success": false}
+Failed prediction for 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg: Unknown error

@@ -1,36 +1,45 @@
 @echo off
-REM Vietnamese ID Card OCR - Monitoring Stack Stop Script (Windows)
-REM This script stops the complete monitoring infrastructure on Windows
+REM Vietnamese ID Card OCR - Complete Stack Stop Script (Windows)
+REM This script stops the complete application and monitoring infrastructure
 
-echo 🛑 Stopping Vietnamese ID Card OCR Monitoring Stack...
+echo 🛑 Stopping Vietnamese ID Card OCR Complete Stack...
 
-REM Stop the monitoring stack
-echo [INFO] Stopping monitoring stack...
-cd monitoring
+REM Navigate to deployment directory
+echo [INFO] Navigating to deployment directory...
+cd "..\deployment\docker"
+
+REM Stop the complete stack
+echo [INFO] Stopping complete stack...
 
 REM Stop and remove containers
-docker-compose -f docker-compose.monitoring.yml down
+docker-compose down
 
-echo [SUCCESS] Monitoring stack stopped successfully!
+echo [SUCCESS] Complete stack stopped successfully!
 
 REM Clean up option
 if "%1"=="--clean" (
-    echo [INFO] Cleaning up monitoring data...
-    set /p clean_confirm="Are you sure you want to delete all monitoring data? (y/N): "
+    echo [INFO] Cleaning up data...
+    set /p clean_confirm="Are you sure you want to delete all data volumes? (y/N): "
     if /i "%clean_confirm%"=="y" (
-        rmdir /s /q monitoring\prometheus\data 2>nul
-        rmdir /s /q monitoring\grafana\data 2>nul
-        rmdir /s /q monitoring\loki\data 2>nul
-        rmdir /s /q monitoring\alertmanager\data 2>nul
-        mkdir monitoring\prometheus\data
-        mkdir monitoring\grafana\data
-        mkdir monitoring\loki\data
-        mkdir monitoring\alertmanager\data
-        echo [SUCCESS] Monitoring data cleaned up
+        docker-compose down -v
+        docker system prune -f
+        echo [SUCCESS] All data cleaned up
     ) else (
-        echo [INFO] Keeping monitoring data
+        echo [INFO] Keeping data volumes
     )
 )
+
+echo.
+echo ✅ Complete Stack Stopped Successfully!
+echo.
+echo 💡 To restart the stack:
+echo    start-monitoring.bat
+echo.
+echo 🧹 To stop and clean all data:
+echo    stop-monitoring.bat --clean
+echo.
+
+pause
 
 echo.
 echo ✅ Monitoring Stack Stopped
