@@ -19,9 +19,9 @@ EXPERIMENT_NAME = "Manual-Upload"
 
 # Use paths from Config
 LOCAL_MODEL_WEIGHTS = {
-    "yolo_text": str(config.YOLO_TEXT_MODEL_PATH),
-    "yolo_text_v2": str(config.YOLO_TEXT_V2_MODEL_PATH),
-    "yolo_corner": str(config.YOLO_CORNER_MODEL_PATH)
+    "yolo_text_detect": str(config.YOLO_TEXT_MODEL_PATH),
+    "yolo_text_detect_v2": str(config.YOLO_TEXT_V2_MODEL_PATH),
+    "yolo_corner_detect": str(config.YOLO_CORNER_MODEL_PATH)
 }
 
 # Use MLflow artifact config from Config

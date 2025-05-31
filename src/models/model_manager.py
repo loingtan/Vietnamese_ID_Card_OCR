@@ -29,12 +29,12 @@ class ModelManager:
             
         self._load_all_models()
 
-    def _get_model_weights_path(self, model_key: str, download_dir: str = "./.temp", model_version: str = "1") -> str:
+    def _get_model_weights_path(self, model_key: str, download_dir: str = "./.temp/serving", model_version: str = "1") -> str:
         """
         Get model weights path, trying MLflow first then falling back to local.
         
         Args:
-            model_key (str): Key identifying the model (e.g., 'yolo_text', 'yolo_corner')
+            model_key (str): Key identifying the model (e.g., 'yolo_text_detect', 'yolo_corner_detect')
             download_dir (str): Directory to store downloaded weights, defaults to './.temp'
             model_version (str): Version of the model to download, defaults to 1
             
@@ -129,7 +129,7 @@ class ModelManager:
     def _load_yolo_text_detection_model(_self):
         """Load YOLO model for text detection."""
         try:
-            model_path = _self._get_model_weights_path("yolo_text")
+            model_path = _self._get_model_weights_path("yolo_text_detect")
             model = YOLO(model_path)
             model.to(_self.device)
             return model
@@ -141,7 +141,7 @@ class ModelManager:
     def _load_yolo_text_detection_model_v2(_self):
         """Load YOLO v2 model for text detection."""
         try:
-            model_path = _self._get_model_weights_path("yolo_text_v2")
+            model_path = _self._get_model_weights_path("yolo_text_detect_v2")
             model = YOLO(model_path)
             model.to(_self.device)
             return model
@@ -153,7 +153,7 @@ class ModelManager:
     def _load_yolo_corner_detection_model(_self):
         """Load YOLO model for ID card corner detection."""
         try:
-            model_path = _self._get_model_weights_path("yolo_corner")
+            model_path = _self._get_model_weights_path("yolo_corner_detect")
             model = YOLO(model_path)
             model.to(_self.device)
             return [model]  # Return as list for compatibility

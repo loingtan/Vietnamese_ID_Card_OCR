@@ -22,9 +22,9 @@ class Config:
     YOLO_TEXT_V2_MODEL_PATH = MODEL_DIR  / "text_detection" / "weights" / "bestv2.pt"
     DICTIONARY_PATH = BASE_DIR / "dictionary" / "dictionaries" / "hongocduc" / "words.txt"
     # LOCAL_MODEL_WEIGHTS = {
-    #     "yolo_text": YOLO_TEXT_MODEL_PATH,
-    #     "yolo_text_v2": YOLO_TEXT_V2_MODEL_PATH,
-    #     "yolo_corner": YOLO_CORNER_MODEL_PATH
+    #     "yolo_text_detect": YOLO_TEXT_MODEL_PATH,
+    #     "yolo_text_v2_detect": YOLO_TEXT_V2_MODEL_PATH,
+    #     "yolo_corner_detect": YOLO_CORNER_MODEL_PATH
     # }
 
     # API Configuration
@@ -61,17 +61,17 @@ class Config:
     MLFLOW_ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
     MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
     MLFLOW_MODEL_ARTIFACTS = {
-        "yolo_text": {
+        "yolo_text_detect": {
             "version": "1",
             "run_id": os.getenv("MLFLOW_RUN_YOLO_TEXT", ""),
             "artifact_path": ""
         },
-        "yolo_text_v2": {
+        "yolo_text_detect_v2": {
             "version": "1",
             "run_id": os.getenv("MLFLOW_RUN_YOLO_TEXT_V2", ""),
             "artifact_path": ""
         },
-        "yolo_corner": {
+        "yolo_corner_detect": {
             "version": "1",
             "run_id": os.getenv("MLFLOW_RUN_YOLO_CORNER", ""),
             "artifact_path": ""
@@ -88,9 +88,9 @@ class Config:
     def get_model_paths(cls) -> Dict[str, Path]:
         """Get dictionary of model paths."""
         return {
-            "yolo_corner": cls.YOLO_CORNER_MODEL_PATH,
-            "yolo_text": cls.YOLO_TEXT_MODEL_PATH,
-            "yolo_text_v2": cls.YOLO_TEXT_V2_MODEL_PATH,
+            "yolo_corner_detect": cls.YOLO_CORNER_MODEL_PATH,
+            "yolo_text_detect": cls.YOLO_TEXT_MODEL_PATH,
+            "yolo_text_detect_v2": cls.YOLO_TEXT_V2_MODEL_PATH,
             "dictionary": cls.DICTIONARY_PATH
         }
 
