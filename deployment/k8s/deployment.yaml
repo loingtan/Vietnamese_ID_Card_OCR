@@ -21,11 +21,11 @@ spec:
           image: k3d-vnidcard-registry:5001/vnidcard-app:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 8501
-              name: streamlit
-              protocol: TCP
             - containerPort: 8080
               name: api
+              protocol: TCP
+            - containerPort: 8000
+              name: metrics
               protocol: TCP
           env:
             - name: PYTHONUNBUFFERED
@@ -34,6 +34,14 @@ spec:
               value: "production"
             - name: LOG_LEVEL
               value: "INFO"
+            - name: API_HOST
+              value: "0.0.0.0"
+            - name: API_PORT
+              value: "8080"
+            - name: METRICS_PORT
+              value: "8000"
+            - name: ENABLE_STREAMLIT
+              value: "false"
           resources:
             requests:
               memory: "512Mi"
@@ -43,16 +51,16 @@ spec:
               cpu: "1000m"
           livenessProbe:
             httpGet:
-              path: /
-              port: 8501
+              path: /health
+              port: 8080
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /
-              port: 8501
+              path: /health
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3

@@ -133,8 +133,8 @@ get_app_info() {
     
     echo ""
     print_status "Application URLs:"
-    echo "- Streamlit App: http://localhost:8501"
-    echo "- API (if available): http://localhost:8080"
+    echo "- API: http://localhost:8080"
+    echo "- Metrics: http://localhost:8000"
     echo "- Registry: http://localhost:5000"
     
     echo ""

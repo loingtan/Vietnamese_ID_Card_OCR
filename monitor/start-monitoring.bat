@@ -22,27 +22,26 @@ if errorlevel 1 (
 
 echo [INFO] Docker and Docker Compose are available
 
+REM Navigate to deployment directory
+echo [INFO] Navigating to deployment directory...
+cd "..\deployment\docker"
+
 REM Create necessary directories
 echo [INFO] Creating necessary directories...
-if not exist "logs" mkdir logs
-if not exist "monitoring\prometheus\data" mkdir monitoring\prometheus\data
-if not exist "monitoring\grafana\data" mkdir monitoring\grafana\data
-if not exist "monitoring\loki\data" mkdir monitoring\loki\data
-if not exist "monitoring\alertmanager\data" mkdir monitoring\alertmanager\data
+if not exist "..\..\logs" mkdir "..\..\logs"
 
 echo [SUCCESS] Directories created successfully
 
 REM Start the monitoring stack
-echo [INFO] Starting monitoring stack...
-cd monitoring
+echo [INFO] Starting monitoring stack with full application...
 
 REM Pull latest images
 echo [INFO] Pulling latest Docker images...
-docker-compose -f docker-compose.monitoring.yml pull
+docker-compose pull
 
-REM Start services
-echo [INFO] Starting services...
-docker-compose -f docker-compose.monitoring.yml up -d
+REM Start services with monitoring profile
+echo [INFO] Starting services with monitoring profile...
+docker-compose --profile monitoring up -d
 
 echo [SUCCESS] Monitoring stack started successfully!
 
@@ -81,14 +80,26 @@ if errorlevel 1 (
     echo [SUCCESS] Loki is running on port 3100
 )
 
+curl -f -s "http://localhost:8080/health" >nul 2>&1
+if errorlevel 1 (
+    echo [WARNING] API might not be ready yet (port 8080)
+) else (
+    echo [SUCCESS] API is running on port 8080
+)
+
 echo.
-echo 🎉 Monitoring Stack Successfully Started!
-echo ==========================================
+echo 🎉 Complete Stack Successfully Started!
+echo =======================================
 echo.
-echo 📊 Access your monitoring services:
+echo 🚀 Access your services:
+echo    • API Application:      http://localhost:8080
+echo    • Streamlit UI:         http://localhost:8501
+echo    • API Metrics:          http://localhost:8000
+echo.
+echo 📊 Monitoring Services:
 echo    • Grafana Dashboard:    http://localhost:3000
 echo      - Username: admin
-echo      - Password: admin
+echo      - Password: vnidcard123
 echo.
 echo    • Prometheus:           http://localhost:9090
 echo    • Alertmanager:         http://localhost:9093
@@ -105,7 +116,7 @@ echo    • Low confidence scores
 echo    • High system resource usage
 echo    • GPU performance issues
 echo.
-echo 💡 To stop the monitoring stack:
+echo 💡 To stop the complete stack:
 echo    stop-monitoring.bat
 echo.
 
