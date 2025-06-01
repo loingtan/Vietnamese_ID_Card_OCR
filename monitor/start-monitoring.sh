@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Vietnamese ID Card OCR - Monitoring Stack Startup Script
-# This script starts the complete monitoring infrastructure
+# Vietnamese ID Card OCR - Complete Stack Startup Script
+# This script starts the complete application and monitoring infrastructure
 
 set -e
 
-echo "🚀 Starting Vietnamese ID Card OCR Monitoring Stack..."
+echo "🚀 Starting Vietnamese ID Card OCR Complete Stack..."
 
 # Color codes for output
 RED='\033[0;31m'
@@ -45,10 +45,138 @@ check_dependencies() {
         exit 1
     fi
     
+    if ! docker info > /dev/null 2>&1; then
+        print_error "Docker daemon is not running. Please start Docker first."
+        exit 1
+    fi
+    
     print_success "All dependencies are available"
 }
 
+# Navigate to deployment directory
+navigate_to_deployment() {
+    print_status "Navigating to deployment directory..."
+    cd "$(dirname "$0")/../deployment/docker"
+    print_success "Changed to deployment directory"
+}
+
 # Create necessary directories
+create_directories() {
+    print_status "Creating necessary directories..."
+    mkdir -p ../../logs
+    print_success "Directories created successfully"
+}
+
+# Start the complete stack
+start_stack() {
+    print_status "Starting complete stack with monitoring..."
+    
+    # Pull latest images
+    print_status "Pulling latest Docker images..."
+    docker-compose pull
+    
+    # Start services with monitoring profile
+    print_status "Starting services with monitoring profile..."
+    docker-compose --profile monitoring up -d
+    
+    print_success "Complete stack started successfully!"
+}
+
+# Wait for services to start
+wait_for_services() {
+    print_status "Waiting for services to start..."
+    sleep 15
+}
+
+# Check service health
+check_service_health() {
+    print_status "Checking service health..."
+    
+    # Check API
+    if curl -f -s "http://localhost:8080/health" > /dev/null 2>&1; then
+        print_success "API is running on port 8080"
+    else
+        print_warning "API might not be ready yet (port 8080)"
+    fi
+    
+    # Check Prometheus
+    if curl -f -s "http://localhost:9090" > /dev/null 2>&1; then
+        print_success "Prometheus is running on port 9090"
+    else
+        print_warning "Prometheus might not be ready yet (port 9090)"
+    fi
+    
+    # Check Grafana
+    if curl -f -s "http://localhost:3000" > /dev/null 2>&1; then
+        print_success "Grafana is running on port 3000"
+    else
+        print_warning "Grafana might not be ready yet (port 3000)"
+    fi
+    
+    # Check Alertmanager
+    if curl -f -s "http://localhost:9093" > /dev/null 2>&1; then
+        print_success "Alertmanager is running on port 9093"
+    else
+        print_warning "Alertmanager might not be ready yet (port 9093)"
+    fi
+    
+    # Check Loki
+    if curl -f -s "http://localhost:3100/ready" > /dev/null 2>&1; then
+        print_success "Loki is running on port 3100"
+    else
+        print_warning "Loki might not be ready yet (port 3100)"
+    fi
+}
+
+# Display access information
+display_access_info() {
+    echo
+    echo "🎉 Complete Stack Successfully Started!"
+    echo "======================================"
+    echo
+    echo "🚀 Access your services:"
+    echo "   • API Application:      http://localhost:8080"
+    echo "   • Streamlit UI:         http://localhost:8501"
+    echo "   • API Metrics:          http://localhost:8000"
+    echo
+    echo "📊 Monitoring Services:"
+    echo "   • Grafana Dashboard:    http://localhost:3000"
+    echo "     - Username: admin"
+    echo "     - Password: vnidcard123"
+    echo
+    echo "   • Prometheus:           http://localhost:9090"
+    echo "   • Alertmanager:         http://localhost:9093"
+    echo "   • Loki:                 http://localhost:3100"
+    echo
+    echo "📈 Pre-configured Dashboards:"
+    echo "   • Vietnamese ID Card API Monitoring"
+    echo "   • System Resource Monitoring"
+    echo "   • Application Logs Dashboard"
+    echo
+    echo "🔔 Alerts are configured for:"
+    echo "   • High API error rates"
+    echo "   • Low confidence scores"
+    echo "   • High system resource usage"
+    echo "   • GPU performance issues"
+    echo
+    echo "💡 To stop the complete stack:"
+    echo "   ./stop-monitoring.sh"
+    echo
+}
+
+# Main execution
+main() {
+    check_dependencies
+    navigate_to_deployment
+    create_directories
+    start_stack
+    wait_for_services
+    check_service_health
+    display_access_info
+}
+
+# Run main function
+main "$@"
 create_directories() {
     print_status "Creating necessary directories..."
     

@@ -1,32 +1,37 @@
-# Docker Compose override for k3d development
-version: '3.8'
+# Docker Compose override for development environment
 
 services:
-  vnidcard-app:
-    build: .
-    image: vnidcard-app:latest
-    ports:
-      - "8501:8501"
-      - "8080:8080"
+  # Override for development
+  vnid-api:
     environment:
-      - PYTHONUNBUFFERED=1
       - ENVIRONMENT=development
       - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+      - ENABLE_STREAMLIT=true  # Enable Streamlit in development
     volumes:
-      - ./src:/app/src
-      - ./logs:/app/logs
-      - ./data:/app/data
-    networks:
-      - vnidcard-net
-    restart: unless-stopped
+      - ../../src:/app/src  # Enable hot reload for development
+      - ../../logs:/app/logs
+      - ../../data:/app/data
+      - ../../config:/app/config
+    ports:
+      - "8080:8080"  # API
+      - "8000:8000"  # Metrics  
+      - "8501:8501"  # Streamlit (enabled in development)
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
+  # Development MongoDB with relaxed settings
+  mongodb:
+    environment:
+      - MONGO_INITDB_DATABASE=vnid_card_ocr_dev
+    command: mongod --noauth --bind_ip_all
+
+# Development specific networks
 networks:
-  vnidcard-net:
-    external: true
-    name: k3d-vnidcard-cluster
+  vnidcard-network:
+    driver: bridge
+    name: vnidcard-dev-network

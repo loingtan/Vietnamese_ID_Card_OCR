@@ -20,16 +20,18 @@ ports:
   - port: 8080:80
     nodeFilters:
       - loadbalancer
-  - port: 8501:8501
+  - port: 8000:8000
     nodeFilters:
-      - loadbalancer  - port: 5001:5001
+      - loadbalancer
+  - port: 5001:5001
     nodeFilters:
       - server:0
 env:
   - envVar: bar=baz
     nodeFilters:
       - server:0
-registries:  create:
+registries:
+  create:
     name: vnidcard-registry
     host: "0.0.0.0"
     hostPort: "5001"

@@ -27,17 +27,12 @@ class Config:
         self.LOGS_DIR = self.BASE_DIR / "logs"
 
         # Model paths
-        self.YOLO_CORNER_MODEL_PATH = self.MODEL_DIR / "corner_detection" / \
+        self.YOLO_CORNER_MODEL_PATH = self.MODEL_DIR / "yolo_corner_detect" / \
             "weights" / "29_03_25-YOLOv11n-Corner-best_metrics.pt"
-        self.YOLO_TEXT_MODEL_PATH = self.MODEL_DIR / "text_detection"/ "weights" / "best.pt"
-        self.YOLO_TEXT_V2_MODEL_PATH = self.MODEL_DIR / "text_detection_v2"/ "weights" / "bestv2.pt"
+        self.YOLO_TEXT_MODEL_PATH = self.MODEL_DIR / "yolo_text_detect"/ "weights" / "best.pt"
+        self.YOLO_TEXT_V2_MODEL_PATH = self.MODEL_DIR / "yolo_text_detect_v2"/ "weights" / "bestv2.pt"
         self.DICTIONARY_PATH = self.DATA_DIR / "dictionary" / \
-            "dictionaries" / "hongocduc" / "words.txt"              
-        # self.LOCAL_MODEL_WEIGHTS = {
-        #     "yolo_text_detect": YOLO_TEXT_MODEL_PATH,
-        #     "yolo_text_v2_detect": YOLO_TEXT_V2_MODEL_PATH,
-        #     "yolo_corner_detect": YOLO_CORNER_MODEL_PATH
-        # }
+            "dictionaries" / "hongocduc" / "words.txt"                         
 
         # API Configuration
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -71,9 +66,9 @@ class Config:
         self.LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         
         # DVC
-        self.YOLO_CORNER_MODEL_DATASET =  self.MODEL_DIR / "corner_detection" / "datasets"
-        self.YOLO_TEXT_MODEL_DATASET = self.MODEL_DIR / "text_detection" / "datasets"
-        self.YOLO_TEXT_MODEL_V2_DATASET = self.MODEL_DIR / "text_detection_v2" / "datasets"
+        self.YOLO_CORNER_MODEL_DATASET =  self.MODEL_DIR / "yolo_corner_detection" / "datasets"
+        self.YOLO_TEXT_MODEL_DATASET = self.MODEL_DIR / "yolo_text_detection" / "datasets"
+        self.YOLO_TEXT_MODEL_V2_DATASET = self.MODEL_DIR / "yolo_text_detection_v2" / "datasets"
 
         # === MLflow Integration ===
         self.MLFLOW_ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"

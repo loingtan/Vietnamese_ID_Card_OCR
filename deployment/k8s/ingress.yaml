@@ -13,13 +13,6 @@ spec:
     - host: vnidcard.local
       http:
         paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: vnidcard-service
-                port:
-                  number: 8501
           - path: /api
             pathType: Prefix
             backend:
@@ -27,6 +20,27 @@ spec:
                 name: vnidcard-service
                 port:
                   number: 8080
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: vnidcard-service
+                port:
+                  number: 8080
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: vnidcard-service
+                port:
+                  number: 8080
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: vnidcard-service
+                port:
+                  number: 8000
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -40,6 +54,7 @@ data:
   log_level: "INFO"
   max_file_size: "10MB"
   allowed_extensions: "png,jpg,jpeg"
+  enable_streamlit: "false"
 
   # Model configuration
   corner_model_path: "/app/corner_detection_model/weight/29_03_25-YOLOv11n-Corner-best_metrics.pt"
@@ -48,4 +63,4 @@ data:
   # API configuration
   api_host: "0.0.0.0"
   api_port: "8080"
-  streamlit_port: "8501"
+  metrics_port: "8000"

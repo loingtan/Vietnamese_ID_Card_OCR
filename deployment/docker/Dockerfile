@@ -1,14 +1,11 @@
-# Vietnamese ID Card OCR Docker Image
-
-FROM python:3.11-slim
+FROM python:3.12.10-slim-bookworm
 
 # Set working directory
 WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    libzbar0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
@@ -17,38 +14,27 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 \
     wget \
     curl \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt ./requirements.txt
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
-COPY setup.py ./
-COPY *.py ./
-
-# Copy source code
+COPY setup.py .
+COPY *.py .
 COPY src/ ./src/
-
-# Copy configuration
 COPY config/ ./config/
-
-# Copy data directory (models, dictionaries, samples)
 COPY data/ ./data/
-
-# Create additional directories for runtime
 RUN mkdir -p logs data/uploads data/outputs
+ENV PYTHONPATH=/app/src \
+    ENVIRONMENT=production
 
-# Expose ports
-EXPOSE 8080 8000 8501
 
-# Environment variables
-ENV PYTHONPATH=/app
-ENV ENVIRONMENT=production
+EXPOSE 8080 8000
 
-# Health check for Streamlit (default service)
+# Define health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
-# Default command - run Streamlit app
-CMD ["python", "-m", "streamlit", "run", "streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+# Set default command
+CMD ["python", "api_app.py"]

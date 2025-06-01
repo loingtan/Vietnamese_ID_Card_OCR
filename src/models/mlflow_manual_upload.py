@@ -18,11 +18,7 @@ MLFLOW_TRACKING_URI = config.MLFLOW_TRACKING_URI
 EXPERIMENT_NAME = "Manual-Upload"
 
 # Use paths from Config
-LOCAL_MODEL_WEIGHTS = {
-    "yolo_text_detect": str(config.YOLO_TEXT_MODEL_PATH),
-    "yolo_text_detect_v2": str(config.YOLO_TEXT_V2_MODEL_PATH),
-    "yolo_corner_detect": str(config.YOLO_CORNER_MODEL_PATH)
-}
+LOCAL_MODEL_WEIGHTS = config.get_model_paths()
 
 # Use MLflow artifact config from Config
 MLFLOW_MODEL_ARTIFACTS = config.MLFLOW_MODEL_ARTIFACTS

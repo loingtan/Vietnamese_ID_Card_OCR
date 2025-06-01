@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Vietnamese ID Card OCR - Monitoring Stack Stop Script
-# This script stops the complete monitoring infrastructure
+# Vietnamese ID Card OCR - Complete Stack Stop Script
+# This script stops the complete application and monitoring infrastructure
 
 set -e
 
-echo "🛑 Stopping Vietnamese ID Card OCR Monitoring Stack..."
+echo "🛑 Stopping Vietnamese ID Card OCR Complete Stack..."
 
 # Color codes for output
 RED='\033[0;31m'
@@ -31,24 +31,62 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Stop the monitoring stack
-stop_monitoring() {
-    print_status "Stopping monitoring stack..."
-    
-    cd monitoring
+# Navigate to deployment directory
+navigate_to_deployment() {
+    print_status "Navigating to deployment directory..."
+    cd "$(dirname "$0")/../deployment/docker"
+    print_success "Changed to deployment directory"
+}
+
+# Stop the complete stack
+stop_stack() {
+    print_status "Stopping complete stack..."
     
     # Stop and remove containers
-    docker-compose -f docker-compose.monitoring.yml down
+    docker-compose down
     
-    print_success "Monitoring stack stopped successfully!"
+    print_success "Complete stack stopped successfully!"
 }
 
 # Clean up (optional)
 cleanup() {
     if [ "$1" = "--clean" ]; then
-        print_status "Cleaning up monitoring data..."
+        print_status "Cleaning up data..."
         
-        # Remove data directories (be careful with this!)
+        read -p "Are you sure you want to delete all data volumes? (y/N): " clean_confirm
+        if [[ $clean_confirm =~ ^[Yy]$ ]]; then
+            docker-compose down -v
+            docker system prune -f
+            print_success "All data cleaned up"
+        else
+            print_status "Keeping data volumes"
+        fi
+    fi
+}
+
+# Display completion information
+display_completion_info() {
+    echo
+    echo "✅ Complete Stack Stopped Successfully!"
+    echo
+    echo "💡 To restart the stack:"
+    echo "   ./start-monitoring.sh"
+    echo
+    echo "🧹 To stop and clean all data:"
+    echo "   ./stop-monitoring.sh --clean"
+    echo
+}
+
+# Main execution
+main() {
+    navigate_to_deployment
+    stop_stack
+    cleanup "$1"
+    display_completion_info
+}
+
+# Run main function
+main "$@"
         read -p "Are you sure you want to delete all monitoring data? (y/N): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
