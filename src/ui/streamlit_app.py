@@ -41,7 +41,7 @@ class StreamlitUI:
         self.processor = None
         self.db_client = MongoDBClient()
         try:
-            self.db_client.connect()
+        self.db_client.connect()
             logger.info("Successfully connected to MongoDB")
         except Exception as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
@@ -105,7 +105,7 @@ class StreamlitUI:
                 "Enable Parallel Processing",
                 value=False,
                 help="Process multiple images simultaneously (experimental)"
-            )
+        )
 
         # Advanced settings
         with st.sidebar.expander("Advanced Settings"):
@@ -223,14 +223,14 @@ class StreamlitUI:
                 col = cols[idx % 3]
                 with col:
                     st.subheader(f"Image {idx + 1}")
-                    image = Image.open(uploaded_file)
-                    st.image(image, use_column_width=True)
-                    
-                    # Convert to numpy array for processing
-                    image_array = np.array(image)
-                    if len(image_array.shape) == 3 and image_array.shape[2] == 3:
-                        # Convert RGB to BGR for OpenCV
-                        image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+            image = Image.open(uploaded_file)
+                st.image(image, use_column_width=True)
+
+            # Convert to numpy array for processing
+            image_array = np.array(image)
+            if len(image_array.shape) == 3 and image_array.shape[2] == 3:
+                # Convert RGB to BGR for OpenCV
+                image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
                     images.append(image_array)
 
             return images, st.container()
@@ -342,28 +342,28 @@ class StreamlitUI:
                             self.display_duplicate_warning(duplicate_info)
                         
                         # Display extracted information
-                        if extracted_info:
-                            info_data = []
-                            field_labels = {
-                                'id_number': '🆔 ID Number',
-                                'full_name': '👤 Full Name',
-                                'date_of_birth': '📅 Date of Birth',
-                                'sex': '⚥ Gender',
-                                'nationality': '🏳️ Nationality',
-                                'place_of_origin': '🏠 Place of Origin',
-                                'place_of_residence': '📍 Place of Residence',
-                                'date_of_expiry': '⏰ Date of Expiry'
-                            }
-                            
-                            for key, value in extracted_info.items():
-                                if value:
+                if extracted_info:
+                    info_data = []
+                    field_labels = {
+                        'id_number': '🆔 ID Number',
+                        'full_name': '👤 Full Name',
+                        'date_of_birth': '📅 Date of Birth',
+                        'sex': '⚥ Gender',
+                        'nationality': '🏳️ Nationality',
+                        'place_of_origin': '🏠 Place of Origin',
+                        'place_of_residence': '📍 Place of Residence',
+                        'date_of_expiry': '⏰ Date of Expiry'
+                    }
+
+                    for key, value in extracted_info.items():
+                        if value:
                                     label = field_labels.get(key, key.replace('_', ' ').title())
                                     info_data.append({'Field': label, 'Value': str(value)})
-                            
-                            if info_data:
-                                df = pd.DataFrame(info_data)
+
+                    if info_data:
+                        df = pd.DataFrame(info_data)
                                 st.dataframe(df, use_container_width=True, hide_index=True)
-                                
+
                                 try:
                                     # Save to MongoDB
                                     ocr_result = OCRResult(
@@ -383,13 +383,13 @@ class StreamlitUI:
                                     st.error(f"Failed to save to database: {e}")
                                 
                                 # Download button for individual result
-                                csv = df.to_csv(index=False)
-                                st.download_button(
+                        csv = df.to_csv(index=False)
+                        st.download_button(
                                     label=f"📥 Download Image {idx+1} Results",
-                                    data=csv,
+                            data=csv,
                                     file_name=f"id_card_info_{idx+1}.csv",
-                                    mime="text/csv"
-                                )
+                            mime="text/csv"
+                        )
                             else:
                                 st.warning("⚠️ No information could be extracted from the image.")
                         else:
