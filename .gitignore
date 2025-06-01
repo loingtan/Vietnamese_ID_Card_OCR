@@ -21,3 +21,4 @@ models/*/datasets/test
 models/*/datasets/*.zip
 models/*/datasets/*.ipynb
 runs/
+**/labels.cache
