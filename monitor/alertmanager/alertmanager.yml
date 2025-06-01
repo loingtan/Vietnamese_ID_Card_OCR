@@ -1,8 +1,6 @@
 global:
-  smtp_smarthost: "localhost:587"
-  smtp_from: "vnidcard-alerts@localhost"
-  smtp_auth_username: ""
-  smtp_auth_password: ""
+  # Slack webhook URL (replace with your actual webhook URL)
+  slack_api_url: "https://hooks.slack.com/services/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"
 
 # Templates
 templates:
@@ -14,160 +12,109 @@ route:
   group_wait: 10s
   group_interval: 10s
   repeat_interval: 12h
-  receiver: "default-receiver"
+  receiver: "default-slack"
   routes:
     # Critical alerts - immediate notification
     - match:
         severity: critical
-      receiver: "critical-alerts"
+      receiver: "critical-slack"
       group_wait: 5s
       repeat_interval: 5m
 
     # API-specific alerts
     - match:
         service: vnidcard-api
-      receiver: "api-alerts"
+      receiver: "api-slack"
       group_wait: 30s
       repeat_interval: 30m
 
     # System alerts
     - match:
         service: system
-      receiver: "system-alerts"
+      receiver: "system-slack"
       group_wait: 2m
       repeat_interval: 1h
 
     # GPU alerts
     - match:
         service: gpu
-      receiver: "gpu-alerts"
+      receiver: "gpu-slack"
       group_wait: 1m
       repeat_interval: 30m
 
     # Model performance alerts
     - match:
         service: vnidcard-model
-      receiver: "model-alerts"
+      receiver: "model-slack"
       group_wait: 1m
       repeat_interval: 15m
 
-# Receivers configuration
+# Receivers configuration - Only Slack
 receivers:
-  - name: "default-receiver"
-    webhook_configs:
-      - url: "http://localhost:5000/webhook"
-        send_resolved: true
-        http_config:
-          basic_auth:
-            username: "vnidcard"
-            password: "webhook123"
-
-  - name: "critical-alerts"
-    # Email notifications for critical alerts
-    email_configs:
-      - to: "admin@vnidcard.local"
-        subject: "🚨 CRITICAL ALERT: Vietnamese ID Card API"
-        body: |
-          🚨 **CRITICAL ALERT**
-
-          **Service:** {{ range .Alerts }}{{ .Labels.service }}{{ end }}
-          **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
-          **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
-          **Time:** {{ range .Alerts }}{{ .StartsAt }}{{ end }}
-
-          Please investigate immediately!
-        headers:
-          Priority: "high"
-
-    # Webhook for critical alerts (can trigger automated actions)
-    webhook_configs:
-      - url: "http://localhost:5000/critical-webhook"
-        send_resolved: true
-        http_config:
-          basic_auth:
-            username: "vnidcard"
-            password: "critical123"
-
-    # Slack notifications for critical alerts
+  - name: "default-slack"
     slack_configs:
-      - api_url: "YOUR_SLACK_WEBHOOK_URL_HERE"
-        channel: "#vnidcard-alerts"
-        title: "🚨 Critical Alert: Vietnamese ID Card API"
+      - channel: "#vnidcard-general"
+        title: "Vietnamese ID Card API Alert"
         text: |
           **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
-          **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
-          **Severity:** {{ range .Alerts }}{{ .Labels.severity }}{{ end }}
-        color: "danger"
-
-    # Telegram notifications for critical alerts
-    telegram_configs:
-      - bot_token: "YOUR_TELEGRAM_BOT_TOKEN_HERE"
-        chat_id: YOUR_TELEGRAM_CHAT_ID_HERE
-        message: |
-          🚨 **CRITICAL ALERT**
-
           **Service:** {{ range .Alerts }}{{ .Labels.service }}{{ end }}
-          **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
           **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+        color: "warning"
 
-  - name: "api-alerts"
-    email_configs:
-      - to: "api-team@vnidcard.local"
-        subject: "⚠️ API Alert: Vietnamese ID Card API"
-        body: |
-          ⚠️ **API ALERT**
-
+  - name: "critical-slack"
+    slack_configs:
+      - channel: "#vnidcard-critical"
+        title: "🚨 CRITICAL: Vietnamese ID Card API"
+        text: |
+          🚨 **CRITICAL ALERT**
           **Service:** {{ range .Alerts }}{{ .Labels.service }}{{ end }}
           **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
           **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
           **Time:** {{ range .Alerts }}{{ .StartsAt }}{{ end }}
 
-    webhook_configs:
-      - url: "http://localhost:5000/api-webhook"
-        send_resolved: true
+          @here Please investigate immediately!
+        color: "danger"
 
-  - name: "system-alerts"
-    email_configs:
-      - to: "sysadmin@vnidcard.local"
-        subject: "🖥️ System Alert: Vietnamese ID Card Infrastructure"
-        body: |
-          🖥️ **SYSTEM ALERT**
+  - name: "api-slack"
+    slack_configs:
+      - channel: "#vnidcard-api"
+        title: "⚠️ API Alert: Vietnamese ID Card"
+        text: |
+          **Service:** {{ range .Alerts }}{{ .Labels.service }}{{ end }}
+          **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+          **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+        color: "warning"
 
+  - name: "system-slack"
+    slack_configs:
+      - channel: "#vnidcard-system"
+        title: "🖥️ System Alert: Vietnamese ID Card"
+        text: |
           **Component:** {{ range .Alerts }}{{ .Labels.service }}{{ end }}
           **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
           **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
           **Instance:** {{ range .Alerts }}{{ .Labels.instance }}{{ end }}
+        color: "warning"
 
-  - name: "gpu-alerts"
-    email_configs:
-      - to: "ml-team@vnidcard.local"
-        subject: "🎮 GPU Alert: Vietnamese ID Card ML Infrastructure"
-        body: |
-          🎮 **GPU ALERT**
-
+  - name: "gpu-slack"
+    slack_configs:
+      - channel: "#vnidcard-ml"
+        title: "🎮 GPU Alert: Vietnamese ID Card ML"
+        text: |
           **GPU:** {{ range .Alerts }}{{ .Labels.gpu }}{{ end }}
           **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
           **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+        color: "warning"
 
-  - name: "model-alerts"
-    email_configs:
-      - to: "ml-team@vnidcard.local"
-        subject: "🤖 Model Alert: Vietnamese ID Card ML Models"
-        body: |
-          🤖 **MODEL ALERT**
-
+  - name: "model-slack"
+    slack_configs:
+      - channel: "#vnidcard-ml"
+        title: "🤖 Model Alert: Vietnamese ID Card ML"
+        text: |
           **Model:** {{ range .Alerts }}{{ .Labels.model_name }}{{ end }}
           **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
           **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
-
-    # Webhook to trigger model retraining
-    webhook_configs:
-      - url: "http://localhost:5000/model-retrain-webhook"
-        send_resolved: false
-        http_config:
-          basic_auth:
-            username: "vnidcard"
-            password: "retrain123"
+        color: "warning"
 
 # Inhibit rules - suppress certain alerts when others are firing
 inhibit_rules:
