@@ -1,7 +1,5 @@
-# Complete Vietnamese ID Card OCR Stack
-# Includes: API Application, Database, and Full Monitoring Stack
 
-services:  # Main API Application
+services: 
   vnid-api:
     build: 
       context: ../../
@@ -23,7 +21,7 @@ services:  # Main API Application
       - ../../data/uploads:/app/data/uploads
       - ../../data/outputs:/app/data/outputs
       - ../../config/.env:/app/config/.env:ro
-      
+
     networks:
       - vnidcard-network
     healthcheck:
@@ -100,15 +98,19 @@ services:  # Main API Application
     ports:
       - "9093:9093"
     volumes:
-      - ../../monitor/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - ../../monitor/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--cluster.listen-address='
     networks:
       - vnidcard-network
     restart: unless-stopped
     profiles: ["monitoring"]
+    depends_on:
+      - prometheus
 
   # Loki - Log Aggregation
   loki:
@@ -126,15 +128,14 @@ services:  # Main API Application
     profiles: ["monitoring"]
 
   # Fluent Bit - Log Collection
-    # Fluent Bit - Log Collection
   fluent-bit:
     image: fluent/fluent-bit:2.2.0
     container_name: vnidcard-fluent-bit
     volumes:
       - ../../monitor/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
       - ../../monitor/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf
-      - ../../logs:/app/logs:ro  # Đổi đường dẫn mount
-      - /var/log:/host/var/log:ro  # Đổi đường dẫn mount để tránh conflict
+      - ../../logs:/app/logs:ro 
+      - /var/log:/host/var/log:ro  
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /sys:/host/sys:ro
       - /proc:/host/proc:ro
