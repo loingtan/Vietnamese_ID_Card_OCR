@@ -68,8 +68,6 @@ VnId-Card/
 │   ├── *.pdiparams.info
 │   ├── *.pdmodel
 │   └── *.yml
-├── yolo_detect_text/       # YOLO models for text detection
-│   └── *.pt
 ├── dictionary/             # Dictionary files for text correction/validation
 │   └── dictionaries/
 │       └── hongocduc/
@@ -129,4 +127,160 @@ VnId-Card/
 *   Improve error handling for edge cases (e.g., very blurry images, unusual lighting).
 *   Containerize the application using Docker for easier deployment.
 *   Add more comprehensive unit and integration tests.
+
+## 🌟 New Features
+
+### API Endpoints
+- **Batch Processing**: Process multiple ID card images in a single request
+- **History Management**: View and search processing history with advanced filtering
+- **Duplicate Detection**: Automatic detection of previously processed ID cards
+- **Auto Port Selection**: Automatic port selection when default ports are in use
+
+### API Documentation
+
+#### 1. Process Single ID Card
+```http
+POST /process-id-card/
+```
+Process a single Vietnamese ID card image.
+
+#### 2. Batch Processing
+```http
+POST /process-batch/
+```
+Process multiple ID card images in one request.
+- Supports up to 10 images per batch
+- Automatic duplicate detection
+- Configurable processing parameters
+
+#### 3. View Processing History
+```http
+GET /history
+```
+Get all processing history with pagination and filtering options:
+- Filter by date range
+- Filter by ID number
+- Filter by success status
+- Pagination support (1-100 items per page)
+
+#### 4. Search by ID Number
+```http
+GET /search/{id_number}
+```
+Search for specific ID card processing results by ID number.
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.8+
+- MongoDB
+- CUDA-capable GPU (recommended)
+
+### Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/Vietnamese_ID_Card_OCR.git
+cd Vietnamese_ID_Card_OCR
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Set up environment variables:
+```bash
+export GEMINI_API_KEY="your_api_key_here"
+```
+
+### Running the Application
+
+1. Start the API server:
+```bash
+python -m src.api.fastapi_app
+```
+
+2. Access the API documentation:
+- Swagger UI: `http://localhost:8080/docs`
+- ReDoc: `http://localhost:8080/redoc`
+
+## 📝 API Usage Examples
+
+### Process Single ID Card
+```python
+import requests
+
+url = "http://localhost:8080/process-id-card/"
+files = {"file": open("id_card.jpg", "rb")}
+response = requests.post(url, files=files)
+print(response.json())
+```
+
+### Batch Processing
+```python
+import requests
+
+url = "http://localhost:8080/process-batch/"
+files = [
+    ("files", open("id_card1.jpg", "rb")),
+    ("files", open("id_card2.jpg", "rb"))
+]
+response = requests.post(url, files=files)
+print(response.json())
+```
+
+### View History
+```python
+import requests
+
+url = "http://localhost:8080/history"
+params = {
+    "page": 1,
+    "page_size": 10,
+    "filter": {
+        "start_date": "2024-03-01T00:00:00Z",
+        "end_date": "2024-03-20T23:59:59Z",
+        "success_only": True
+    }
+}
+response = requests.get(url, params=params)
+print(response.json())
+```
+
+## 🔧 Configuration
+
+The API supports various configuration options:
+
+### Processing Configuration
+- Confidence threshold
+- NMS threshold
+- Image enhancement
+- Processing method selection
+
+### Batch Processing Settings
+- Maximum batch size
+- Parallel processing option
+
+## 📊 Monitoring
+
+The API includes built-in monitoring features:
+- Prometheus metrics endpoint
+- Processing time tracking
+- Success/error rate monitoring
+- Request count tracking
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- YOLO for object detection
+- VietOCR for Vietnamese text recognition
+- Google Gemini for AI-powered information extraction
 
