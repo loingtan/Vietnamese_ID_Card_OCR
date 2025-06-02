@@ -39,8 +39,16 @@ class StreamlitUI:
         self.port = port
         self.config = get_config()
         self.setup_page_config()
-        self.model_manager = None
-        self.processor = None
+        
+        # Initialize model state in session state
+        if 'model_manager' not in st.session_state:
+            st.session_state.model_manager = None
+        if 'processor' not in st.session_state:
+            st.session_state.processor = None
+            
+        self.model_manager = st.session_state.model_manager
+        self.processor = st.session_state.processor
+        
         self.db_client = MongoDBClient()
         try:
             self.db_client.connect()
@@ -76,10 +84,39 @@ class StreamlitUI:
         """Setup sidebar with configuration options."""
         st.sidebar.title("⚙️ Configuration")
 
-        # Add navigation
-        page = st.sidebar.radio("Navigation", ["Scan ID Card", "View History"])
+        # Add navigation with styled buttons
+        st.sidebar.markdown("### 📱 Navigation")
+        col1, col2 = st.sidebar.columns(2)
+        
+        with col1:
+            scan_button = st.button(
+                "🆔 Scan ID Card",
+                use_container_width=True,
+                help="Upload and process ID card images"
+            )
+        
+        with col2:
+            history_button = st.button(
+                "📚 View History",
+                use_container_width=True,
+                help="View processing history"
+            )
+        
+        # Set active page based on button clicks
+        if 'active_page' not in st.session_state:
+            st.session_state.active_page = "Scan ID Card"
+            
+        if scan_button:
+            st.session_state.active_page = "Scan ID Card"
+        elif history_button:
+            st.session_state.active_page = "View History"
+            
+        # Add visual feedback for active page
+        st.sidebar.markdown("---")
+        st.sidebar.markdown(f"**Current Page:** {st.session_state.active_page}")
 
         # API Key input
+        st.sidebar.markdown("### 🔑 API Settings")
         api_key = st.sidebar.text_input(
             "Gemini API Key (Optional)",
             type="password",
@@ -87,6 +124,7 @@ class StreamlitUI:
         )
 
         # Model selection
+        st.sidebar.markdown("### 🛠️ Processing Settings")
         processing_method = st.sidebar.selectbox(
             "Processing Method",
             ["Auto (Gemini + OCR)", "Traditional OCR Only", "Gemini Only"],
@@ -94,7 +132,7 @@ class StreamlitUI:
         )
 
         # Batch processing options
-        with st.sidebar.expander("Batch Processing Settings"):
+        with st.sidebar.expander("📦 Batch Processing Settings"):
             batch_size = st.number_input(
                 "Maximum Images per Batch",
                 min_value=1,
@@ -110,7 +148,7 @@ class StreamlitUI:
             )
 
         # Advanced settings
-        with st.sidebar.expander("Advanced Settings"):
+        with st.sidebar.expander("⚡ Advanced Settings"):
             confidence_threshold = st.slider(
                 "Detection Confidence",
                 min_value=0.1,
@@ -133,7 +171,7 @@ class StreamlitUI:
             )
 
         return {
-            'page': page,
+            'page': st.session_state.active_page,
             'api_key': api_key,
             'processing_method': processing_method,
             'confidence_threshold': confidence_threshold,
@@ -145,11 +183,13 @@ class StreamlitUI:
 
     def initialize_models(self, api_key: str = None):
         """Initialize models with caching."""
-        if self.model_manager is None:
+        if st.session_state.model_manager is None:
             with st.spinner("Loading models... This may take a few minutes on first run."):
                 try:
-                    self.model_manager = ModelManager(api_key=api_key)
-                    self.processor = IDCardProcessor(self.model_manager)
+                    st.session_state.model_manager = ModelManager(api_key=api_key)
+                    st.session_state.processor = IDCardProcessor(st.session_state.model_manager)
+                    self.model_manager = st.session_state.model_manager
+                    self.processor = st.session_state.processor
                     st.success("✅ Models loaded successfully!")
                 except Exception as e:
                     st.error(f"❌ Error loading models: {str(e)}")
@@ -186,12 +226,22 @@ class StreamlitUI:
             try:
                 # Process the image
                 result = self.processor.process_id_card(image)
-                results.append(result)
+                if result and 'extracted_info' in result:
+                    results.append({
+                        'status': 'success',
+                        'extracted_info': result['extracted_info'],
+                        'message': 'Successfully processed'
+                    })
+                else:
+                    results.append({
+                        'status': 'error',
+                        'message': 'Failed to extract information'
+                    })
             except Exception as e:
                 logger.error(f"Error processing image {idx + 1}: {e}")
                 results.append({
                     'status': 'error',
-                    'message': str(e)
+                    'message': f"Error: {str(e)}"
                 })
             
             # Update progress
@@ -221,15 +271,15 @@ class StreamlitUI:
                 col = cols[idx % 3]
                 with col:
                     st.subheader(f"Image {idx + 1}")
-            image = Image.open(uploaded_file)
-                st.image(image, use_column_width=True)
+                    image = Image.open(uploaded_file)
+                    st.image(image, use_container_width=True)
 
-            # Convert to numpy array for processing
-            image_array = np.array(image)
-            if len(image_array.shape) == 3 and image_array.shape[2] == 3:
-                # Convert RGB to BGR for OpenCV
-                image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
-                    images.append(image_array)
+                    # Convert to numpy array for processing
+                    image_array = np.array(image)
+                    if len(image_array.shape) == 3 and image_array.shape[2] == 3:
+                        # Convert RGB to BGR for OpenCV
+                        image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+                        images.append(image_array)
 
             return images, st.container()
 
@@ -340,28 +390,28 @@ class StreamlitUI:
                             self.display_duplicate_warning(duplicate_info)
                         
                         # Display extracted information
-                if extracted_info:
-                    info_data = []
-                    field_labels = {
-                        'id_number': '🆔 ID Number',
-                        'full_name': '👤 Full Name',
-                        'date_of_birth': '📅 Date of Birth',
-                        'sex': '⚥ Gender',
-                        'nationality': '🏳️ Nationality',
-                        'place_of_origin': '🏠 Place of Origin',
-                        'place_of_residence': '📍 Place of Residence',
-                        'date_of_expiry': '⏰ Date of Expiry'
-                    }
+                        if extracted_info:
+                            info_data = []
+                            field_labels = {
+                                'id_number': '🆔 ID Number',
+                                'full_name': '👤 Full Name',
+                                'date_of_birth': '📅 Date of Birth',
+                                'sex': '⚥ Gender',
+                                'nationality': '🏳️ Nationality',
+                                'place_of_origin': '🏠 Place of Origin',
+                                'place_of_residence': '📍 Place of Residence',
+                                'date_of_expiry': '⏰ Date of Expiry'
+                            }
 
-                    for key, value in extracted_info.items():
-                        if value:
+                            for key, value in extracted_info.items():
+                                if value:
                                     label = field_labels.get(key, key.replace('_', ' ').title())
                                     info_data.append({'Field': label, 'Value': str(value)})
 
-                    if info_data:
-                        df = pd.DataFrame(info_data)
+                            if info_data:
+                                df = pd.DataFrame(info_data)
                                 st.dataframe(df, use_container_width=True, hide_index=True)
-
+                                
                                 try:
                                     # Save to MongoDB
                                     ocr_result = OCRResult(
@@ -381,15 +431,13 @@ class StreamlitUI:
                                     st.error(f"Failed to save to database: {e}")
                                 
                                 # Download button for individual result
-                        csv = df.to_csv(index=False)
-                        st.download_button(
+                                csv = df.to_csv(index=False)
+                                st.download_button(
                                     label=f"📥 Download Image {idx+1} Results",
-                            data=csv,
+                                    data=csv,
                                     file_name=f"id_card_info_{idx+1}.csv",
-                            mime="text/csv"
-                        )
-                            else:
-                                st.warning("⚠️ No information could be extracted from the image.")
+                                    mime="text/csv"
+                                )
                         else:
                             st.warning("⚠️ No information could be extracted from the image.")
                     else:
@@ -447,7 +495,7 @@ class StreamlitUI:
 
         self.display_header()
 
-        # Initialize models
+        # Initialize models only if not already initialized
         if not self.initialize_models(config.get('api_key')):
             st.stop()
 
@@ -475,6 +523,9 @@ class StreamlitUI:
                         
                     except Exception as e:
                         st.error(f"❌ Error processing images: {str(e)}")
+        else:
+            # Display a message when no images are uploaded
+            st.info("👆 Please upload one or more ID card images to begin processing.")
 
         # Footer
         st.markdown("---")

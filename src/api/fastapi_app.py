@@ -37,12 +37,14 @@ try:
     from ..webhooks.alert_handlers import router as alert_router
     from ..config import get_config
     from ..monitor import SystemMetricsCollector
+    from ..database import MongoDBClient, OCRResult
 except ImportError:
     from src.models.model_manager import ModelManager
     from src.core.id_card_processor import IDCardProcessor
     from src.webhooks.alert_handlers import router as alert_router
     from src.config import get_config
     from src.monitor import SystemMetricsCollector
+    from src.database import MongoDBClient, OCRResult
 
 # Load configuration
 config = get_config()
