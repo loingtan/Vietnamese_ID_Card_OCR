@@ -36,11 +36,13 @@ try:
     from ..core.id_card_processor import IDCardProcessor
     from ..webhooks.alert_handlers import router as alert_router
     from ..config import get_config
+    from ..monitor import SystemMetricsCollector
 except ImportError:
     from src.models.model_manager import ModelManager
     from src.core.id_card_processor import IDCardProcessor
     from src.webhooks.alert_handlers import router as alert_router
     from src.config import get_config
+    from src.monitor import SystemMetricsCollector
 
 # Load configuration
 config = get_config()
