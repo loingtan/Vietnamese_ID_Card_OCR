@@ -26,3 +26,5 @@ data/
 logs/
 yolo_detect_text/
 corner_detection_model/
+# Environment variables
+.env

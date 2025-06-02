@@ -19,6 +19,7 @@ import logging
 from ..models.model_manager import ModelManager
 from ..core.id_card_processor import IDCardProcessor
 from src.database import MongoDBClient, OCRResult, UserSession
+from ..config import get_config
 
 # Configure logging
 logging.basicConfig(
@@ -36,12 +37,13 @@ class StreamlitUI:
 
     def __init__(self, port: int = 8501):
         self.port = port
+        self.config = get_config()
         self.setup_page_config()
         self.model_manager = None
         self.processor = None
         self.db_client = MongoDBClient()
         try:
-        self.db_client.connect()
+            self.db_client.connect()
             logger.info("Successfully connected to MongoDB")
         except Exception as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
@@ -105,7 +107,7 @@ class StreamlitUI:
                 "Enable Parallel Processing",
                 value=False,
                 help="Process multiple images simultaneously (experimental)"
-        )
+            )
 
         # Advanced settings
         with st.sidebar.expander("Advanced Settings"):
@@ -163,15 +165,11 @@ class StreamlitUI:
         """)
 
         # Add some metrics or info
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2 = st.columns(2)
         with col1:
             st.metric("Supported Formats", "Old & New ID")
         with col2:
             st.metric("Languages", "Vietnamese")
-        with col3:
-            st.metric("Processing", "AI + OCR")
-        with col4:
-            st.metric("Accuracy", "95%+")
 
     def process_batch_images(self, images: List[np.ndarray]) -> List[Dict[str, Any]]:
         """Process a batch of images."""
@@ -432,7 +430,7 @@ class StreamlitUI:
             ### Features:
             - ✅ Supports both old and new Vietnamese ID card formats
             - ✅ High accuracy Vietnamese text recognition
-            - ✅ Automatic perspective and orientation correction
+            - ✅ Automatuse_container_width=Trueic perspective and orientation correction
             - ✅ AI-powered information extraction with Gemini
             - ✅ Fallback to traditional OCR methods
             """)

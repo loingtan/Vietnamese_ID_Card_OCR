@@ -1,0 +1,133 @@
+global:
+  # Slack webhook URL (replace with your actual webhook URL)
+  slack_api_url: "https://hooks.slack.com/services/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"
+
+# Templates
+templates:
+  - "/etc/alertmanager/templates/*.tmpl"
+
+# Route configuration
+route:
+  group_by: ["alertname", "service"]
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: "default-slack"
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: "critical-slack"
+      group_wait: 5s
+      repeat_interval: 5m
+
+    # API-specific alerts
+    - match:
+        service: vnidcard-api
+      receiver: "api-slack"
+      group_wait: 30s
+      repeat_interval: 30m
+
+    # System alerts
+    - match:
+        service: system
+      receiver: "system-slack"
+      group_wait: 2m
+      repeat_interval: 1h
+
+    # GPU alerts
+    - match:
+        service: gpu
+      receiver: "gpu-slack"
+      group_wait: 1m
+      repeat_interval: 30m
+
+    # Model performance alerts
+    - match:
+        service: vnidcard-model
+      receiver: "model-slack"
+      group_wait: 1m
+      repeat_interval: 15m
+
+# Receivers configuration - Only Slack
+receivers:
+  - name: "default-slack"
+    slack_configs:
+      - channel: "#vnidcard-general"
+        title: "Vietnamese ID Card API Alert"
+        text: |
+          **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+          **Service:** {{ range .Alerts }}{{ .Labels.service }}{{ end }}
+          **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+        color: "warning"
+
+  - name: "critical-slack"
+    slack_configs:
+      - channel: "#vnidcard-critical"
+        title: "🚨 CRITICAL: Vietnamese ID Card API"
+        text: |
+          🚨 **CRITICAL ALERT**
+          **Service:** {{ range .Alerts }}{{ .Labels.service }}{{ end }}
+          **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+          **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+          **Time:** {{ range .Alerts }}{{ .StartsAt }}{{ end }}
+
+          @here Please investigate immediately!
+        color: "danger"
+
+  - name: "api-slack"
+    slack_configs:
+      - channel: "#vnidcard-api"
+        title: "⚠️ API Alert: Vietnamese ID Card"
+        text: |
+          **Service:** {{ range .Alerts }}{{ .Labels.service }}{{ end }}
+          **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+          **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+        color: "warning"
+
+  - name: "system-slack"
+    slack_configs:
+      - channel: "#vnidcard-system"
+        title: "🖥️ System Alert: Vietnamese ID Card"
+        text: |
+          **Component:** {{ range .Alerts }}{{ .Labels.service }}{{ end }}
+          **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+          **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+          **Instance:** {{ range .Alerts }}{{ .Labels.instance }}{{ end }}
+        color: "warning"
+
+  - name: "gpu-slack"
+    slack_configs:
+      - channel: "#vnidcard-ml"
+        title: "🎮 GPU Alert: Vietnamese ID Card ML"
+        text: |
+          **GPU:** {{ range .Alerts }}{{ .Labels.gpu }}{{ end }}
+          **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+          **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+        color: "warning"
+
+  - name: "model-slack"
+    slack_configs:
+      - channel: "#vnidcard-ml"
+        title: "🤖 Model Alert: Vietnamese ID Card ML"
+        text: |
+          **Model:** {{ range .Alerts }}{{ .Labels.model_name }}{{ end }}
+          **Alert:** {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+          **Description:** {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+        color: "warning"
+
+# Inhibit rules - suppress certain alerts when others are firing
+inhibit_rules:
+  # Suppress warning alerts when critical alerts are firing for the same service
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal: ["service", "instance"]
+
+  # Suppress individual alerts when service is down
+  - source_match:
+      alertname: "APIServiceDown"
+    target_match_re:
+      alertname: "High.*|Low.*"
+    equal: ["service"]

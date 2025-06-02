@@ -1,0 +1,37 @@
+# Docker Compose override for development environment
+
+services:
+  # Override for development
+  vnid-api:
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+      - ENABLE_STREAMLIT=true  # Enable Streamlit in development
+    volumes:
+      - ../../src:/app/src  # Enable hot reload for development
+      - ../../logs:/app/logs
+      - ../../data:/app/data
+      - ../../config:/app/config
+    ports:
+      - "8080:8080"  # API
+      - "8000:8000"  # Metrics  
+      - "8501:8501"  # Streamlit (enabled in development)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Development MongoDB with relaxed settings
+  mongodb:
+    environment:
+      - MONGO_INITDB_DATABASE=vnid_card_ocr_dev
+    command: mongod --noauth --bind_ip_all
+
+# Development specific networks
+networks:
+  vnidcard-network:
+    driver: bridge
+    name: vnidcard-dev-network

@@ -1,0 +1,119 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Vietnamese ID Card OCR - Logs Dashboard",
+    "tags": ["vnidcard", "logs", "debugging"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Application Logs",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"fluent-bit\", service=\"Vietnamese_ID_Card_OCR\"}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Error Logs",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"fluent-bit\", level=\"ERROR\"}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "wrapLogMessage": true,
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "id": 3,
+        "title": "API Request Logs",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"fluent-bit\", service=\"Vietnamese_ID_Card_OCR\", logger=\"uvicorn.access\"}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "wrapLogMessage": true,
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "id": 4,
+        "title": "System Logs",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"fluent-bit\", tag=\"vnidcard.syslog\"}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "wrapLogMessage": true,
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "id": 5,
+        "title": "Model Inference Logs",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"fluent-bit\", tag=\"vnidcard.model\"}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "wrapLogMessage": true,
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "id": 6,
+        "title": "Log Volume by Level",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum by (level) (rate({job=\"fluent-bit\"}[1m]))",
+            "legendFormat": "{{level}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "5s"
+  }
+}

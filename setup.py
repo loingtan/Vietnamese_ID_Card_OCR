@@ -31,7 +31,7 @@ setup(
     description="Vietnamese ID Card OCR system using deep learning",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/your-username/vietnamese-id-card-ocr",
+    url="https://github.com/loingtan/Vietnamese_ID_Card_OCR",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     classifiers=[

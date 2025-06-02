@@ -194,11 +194,6 @@ urllib3==2.3.0
 uvicorn==0.34.0
 vietocr==0.3.13
 vnaddress==1.0.5
-watchdog==6.0.0
-wcwidth==0.2.13
-webencodings==0.5.1
-websockets==15.0.1
-wheel==0.45.1
-yarg==0.1.9
+
 # # Platform dependent
 # pywin32==310

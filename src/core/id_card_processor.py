@@ -14,50 +14,59 @@ from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime
 
 import torch
+try:
+    from ..models.model_manager import ModelManager
+    from ..utils.image_processing import (
+        apply_nms, calculate_iou, detect_id_card, draw_yolo, sharpen_image, warp_and_recognize,
 
-from ..models.model_manager import ModelManager
-from ..utils.image_processing import (
-    apply_nms, calculate_iou, detect_id_card, draw_yolo, sharpen_image, warp_and_recognize,
+        pil_to_bytes, resize_image, enhance_image
+    )
+    from ..utils.text_processing import (
+        extract_id_number, extract_dates, extract_gender,
+        is_vietnamese_name, normalize_vietnamese_text,
+        validate_id_card_fields, load_vietnamese_dictionary
+    )
+    from ..database.mongodb import db_client
+    from ..database.models import OCRResult, ProcessingMetrics, IDCardInfo
+    from ..config import get_config
+except ImportError:
+    from models.model_manager import ModelManager
+    from utils.image_processing import (
+        apply_nms, calculate_iou, detect_id_card, draw_yolo, sharpen_image, warp_and_recognize,
 
-    pil_to_bytes, resize_image, enhance_image
-)
-from ..utils.text_processing import (
-    extract_id_number, extract_dates, extract_gender,
-    is_vietnamese_name, normalize_vietnamese_text,
-    validate_id_card_fields, load_vietnamese_dictionary
-)
-from ..database.mongodb import db_client
-from ..database.models import OCRResult, ProcessingMetrics, IDCardInfo
+        pil_to_bytes, resize_image, enhance_image
+    )
+    from utils.text_processing import (
+        extract_id_number, extract_dates, extract_gender,
+        is_vietnamese_name, normalize_vietnamese_text,
+        validate_id_card_fields, load_vietnamese_dictionary
+    )
+
+    from types import SimpleNamespace
+    db_client = SimpleNamespace()
+    db_client.is_connected = False
+    OCRResult = dict
+    ProcessingMetrics = dict
+    IDCardInfo = dict
+    from config import get_config
 
 logger = logging.getLogger(__name__)
 
 
 class IDCardProcessor:
-    """Main processor for Vietnamese ID Card OCR."""
-
     def __init__(self, model_manager: ModelManager):
+        self.config = get_config()
         self.model_manager = model_manager
         self.vietnamese_words = load_vietnamese_dictionary()
 
     def process_image_with_gemini(self, image: Image.Image) -> Dict[str, Any]:
-        """
-        Process ID card image using Gemini Vision API.
-
-        Args:
-            image: PIL Image of the ID card
-
-        Returns:
-            Structured information extracted from the ID card
-        """
         try:
             client = self.model_manager.get_model('gemini_client')
             if not client:
                 return {}
 
-            # Convert PIL Image to PNG bytes
             img_bytes = pil_to_bytes(image, 'PNG')
 
-            # Create content parts for Gemini
             image_part = {
                 "inline_data": {
                     "data": img_bytes,
@@ -89,9 +98,7 @@ class IDCardProcessor:
             response = client.models.generate_content(
                 model="gemini-2.5-flash-preview-04-17",
                 contents=[image_part, prompt]
-            )
-
-            # Try to extract JSON from the response
+            )            # Try to extract JSON from the response
             try:
                 return json.loads(response.text)
             except json.JSONDecodeError:
@@ -104,7 +111,7 @@ class IDCardProcessor:
                 return {}
 
         except Exception as e:
-            print(f"Error processing image with Gemini: {str(e)}")
+            logger.error(f"Error processing image with Gemini: {str(e)}")
             return {}
 
     def process_image_wtih_vietocr(self, image: Image.Image) -> Dict[str, Any]:
@@ -295,15 +302,6 @@ class IDCardProcessor:
         return result
 
     def extract_field_info(self, extracted_texts: List[str]) -> Dict[str, Any]:
-        """
-        Extract structured information from a list of extracted texts.
-
-        Args:
-            extracted_texts: List of text strings from OCR
-
-        Returns:
-            Dictionary with structured ID card information
-        """
         if not extracted_texts or not isinstance(extracted_texts, list):
             return {}
 
@@ -368,17 +366,8 @@ class IDCardProcessor:
         return validate_id_card_fields(structured_info)
 
     def process_id_card(self, image: np.ndarray) -> Dict[str, Any]:
-        """
-        Main processing pipeline for ID card images.
-
-        Args:
-            image: Input image as numpy array
-
-        Returns:
-            Dictionary with processing results
-        """
         try:
-            # Resize image if too large
+            logger.info("Processing ID card image...")
             processed_image = resize_image(image)
 
             # Enhance image quality
@@ -406,8 +395,7 @@ class IDCardProcessor:
                 processed_image = sharpen_image(processed_image)
             # pil_image = Image.fromarray(cv2.cvtColor(
             #     processed_image, cv2.COLOR_BGR2RGB))
-
-            # Try Gemini processing first (if available)
+            logger.info(f"{processed_image.shape}")
             info, image = self.process_image_wtih_vietocr(processed_image)
             # gemini_result = self.process_image_with_gemini(pil_image)
 
@@ -423,9 +411,7 @@ class IDCardProcessor:
             # For now, returning a placeholder
             return {
                 'status': 'success',
-                'method': 'traditional_ocr',
                 'extracted_info': info,
-                'message': 'Traditional OCR pipeline not fully implemented yet'
             }
 
         except Exception as e:

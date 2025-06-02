@@ -11,9 +11,16 @@ import numpy as np
 from PIL import Image
 import io
 import logging
-from prometheus_client import Counter, Histogram, start_http_server, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry
+import sys
+from prometheus_client import Counter, Histogram, Gauge, start_http_server, generate_latest, CONTENT_TYPE_LATEST
 from fastapi import Response
 import time
+import psutil
+try:
+    import GPUtil
+    GPU_AVAILABLE = True
+except ImportError:
+    GPU_AVAILABLE = False
 from typing import Dict, Any, Optional, List
 import json
 from datetime import datetime, timedelta
@@ -21,28 +28,110 @@ import os
 import uuid
 import socket
 from pydantic import BaseModel
+import threading
 
-from ..models.model_manager import ModelManager
-from ..core.id_card_processor import IDCardProcessor
-from src.database import MongoDBClient, OCRResult, UserSession
+# Try relative imports first, fallback to absolute imports for testing
+try:
+    from ..models.model_manager import ModelManager
+    from ..core.id_card_processor import IDCardProcessor
+    from ..webhooks.alert_handlers import router as alert_router
+    from ..config import get_config
+except ImportError:
+    from src.models.model_manager import ModelManager
+    from src.core.id_card_processor import IDCardProcessor
+    from src.webhooks.alert_handlers import router as alert_router
+    from src.config import get_config
 
-# Metrics
+# Load configuration
+config = get_config()
+
+# Fix Windows console encoding for Vietnamese characters
+if sys.platform == "win32":
+    try:
+        # Set console to UTF-8 mode on Windows
+        import locale
+        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+    except (locale.Error, ImportError):
+        try:
+            # Alternative approach for Windows
+            import codecs
+            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
+            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
+        except Exception:
+            # If all else fails, we'll rely on the safe logging approach
+            pass
+
+# Enhanced Metrics for Comprehensive Monitoring
 REQUEST_COUNT = Counter('request_count_total', 'Total requests processed')
-PROCESSING_TIME = Histogram('processing_time_seconds', 'Time spent processing request')
+PROCESSING_TIME = Histogram(
+    'processing_time_seconds', 'Time spent processing request',
+    buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0]
+)
 ERROR_COUNT = Counter('error_count_total', 'Total errors encountered')
 SUCCESS_COUNT = Counter('success_count_total', 'Total successful requests')
 BATCH_REQUEST_COUNT = Counter('batch_request_count_total', 'Total batch requests processed')
 
-# Logging configuration
+# Model Performance Metrics
+INFERENCE_TIME = Histogram(
+    'inference_time_seconds', 'Model inference time',
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+)
+CONFIDENCE_SCORE = Histogram(
+    'confidence_score', 'Model confidence score',
+    buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+)
+MODEL_LOADING_STATUS = Gauge(
+    'model_loading_status', 'Model loading status (1=loaded, 0=failed)', ['model_name'])
+
+# System Resource Metrics
+CPU_USAGE = Gauge('cpu_usage_percent', 'CPU usage percentage')
+MEMORY_USAGE = Gauge('memory_usage_percent', 'Memory usage percentage')
+DISK_USAGE = Gauge('disk_usage_percent',
+                   'Disk usage percentage', ['mountpoint'])
+GPU_USAGE = Gauge('gpu_usage_percent', 'GPU usage percentage', ['gpu_id'])
+GPU_MEMORY_USAGE = Gauge('gpu_memory_usage_percent',
+                         'GPU memory usage percentage', ['gpu_id'])
+GPU_TEMPERATURE = Gauge('gpu_temperature_celsius',
+                        'GPU temperature in Celsius', ['gpu_id'])
+
+# Network Metrics
+NETWORK_BYTES_SENT = Counter(
+    'network_bytes_sent_total', 'Total network bytes sent')
+NETWORK_BYTES_RECV = Counter(
+    'network_bytes_recv_total', 'Total network bytes received')
+
+# Enhanced Logging configuration with multiple handlers
+os.makedirs('logs', exist_ok=True)
+
+# Configure stream handler with UTF-8 encoding for Windows
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+
+# Configure file handlers with UTF-8 encoding
+file_handler = logging.FileHandler('logs/api.log', encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+
+error_file_handler = logging.FileHandler(
+    'logs/error.log', mode='a', encoding='utf-8')
+error_file_handler.setLevel(logging.ERROR)
+error_file_handler.setFormatter(file_formatter)
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('api.log'),
-        logging.StreamHandler()
-    ]
+    handlers=[file_handler, error_file_handler, console_handler]
 )
+
+# Create specialized loggers
 logger = logging.getLogger(__name__)
+error_logger = logging.getLogger('error')
+model_logger = logging.getLogger('model')
+metrics_logger = logging.getLogger('metrics')
 
 class ProcessingConfig(BaseModel):
     """Configuration for image processing."""
@@ -82,6 +171,9 @@ class IDCardAPI:
     """FastAPI application for ID Card OCR."""
 
     def __init__(self, api_key: Optional[str] = None):
+        # Initialize system metrics collector
+        self.metrics_collector = SystemMetricsCollector()
+
         self.app = FastAPI(
             title="Vietnamese ID Card Scanner API",
             description="API for scanning and extracting information from Vietnamese ID cards",
@@ -97,9 +189,7 @@ class IDCardAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
-        )
-
-        # Initialize models
+        )        # Initialize models
         self.model_manager = ModelManager(api_key=api_key)
         self.processor = IDCardProcessor(self.model_manager)
 
@@ -112,6 +202,12 @@ class IDCardAPI:
 
         # Setup routes
         self._setup_routes()
+
+        # Setup startup and shutdown events
+        self._setup_events()
+
+        # Include webhook handlers
+        self.app.include_router(alert_router)
 
     def _setup_routes(self):
         """Setup API routes."""
@@ -141,9 +237,7 @@ class IDCardAPI:
                     raise HTTPException(
                         status_code=400,
                         detail="File must be an image"
-                    )
-
-                # Read and process image
+                    )                # Read and process image
                 contents = await file.read()
                 nparr = np.frombuffer(contents, np.uint8)
                 image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -155,11 +249,27 @@ class IDCardAPI:
                         detail="Could not decode image file"
                     )
 
-                # Process image
+                logger.info(f"Processing file: {file.filename}")
+                inference_start = time.time()
                 result = self.processor.process_id_card(image)
+                inference_time = time.time() - inference_start
 
-                # Log prediction
-                self._log_prediction(result, file.filename)
+                # Record inference time
+                INFERENCE_TIME.observe(inference_time)
+
+                # Record confidence scores if available
+                if result and 'confidence' in result:
+                    confidence = result['confidence']
+                    CONFIDENCE_SCORE.observe(confidence)
+
+                    # Log low confidence predictions
+                    if confidence < 0.6:
+                        error_logger.warning(
+                            f"Low confidence prediction: {confidence:.3f} for file {file.filename}"
+                        )
+
+                # Log prediction with detailed metrics
+                self._log_prediction(result, file.filename, inference_time)
 
                 # Calculate processing time
                 processing_time = time.time() - start_time
@@ -176,6 +286,8 @@ class IDCardAPI:
                             result['duplicate_info'] = duplicate_info
                 else:
                     ERROR_COUNT.inc()
+                    error_logger.error(
+                        f"Failed prediction for {file.filename}: {result.get('error', 'Unknown error')}")
 
                 # Save to database
                 session_id = str(uuid.uuid4())
@@ -402,8 +514,7 @@ class IDCardAPI:
                 if model_name:
                     self.model_manager.reload_model(model_name)
                     return {"status": "success", "message": f"Model {model_name} reloaded"}
-                else:
-                    # Reload all models
+                else:                    # Reload all models
                     self.model_manager._load_all_models()
                     return {"status": "success", "message": "All models reloaded"}
             except Exception as e:
@@ -506,20 +617,79 @@ class IDCardAPI:
             logger.error(f"Error checking duplicate ID: {e}")
             return {'is_duplicate': False, 'error': str(e)}
 
-    def _log_prediction(self, result: Dict[str, Any], filename: str):
+    def _log_prediction(self, result: Dict[str, Any], filename: str, inference_time: float):
         """Log prediction results for monitoring."""
+        confidence = result.get('confidence', 0.0) if result else 0.0
+
         log_entry = {
             "timestamp": datetime.now().isoformat(),
             "filename": filename,
+            "inference_time": inference_time,
+            "confidence": confidence,
             "result": result,
-            "model_version": "1.0.0"
+            "model_version": "1.0.0",
+            "success": result.get('status') == 'success' if result else False
         }
 
-        # Log to file
-        logger.info(f"Prediction: {json.dumps(log_entry, ensure_ascii=False)}")
+        try:
+            # Log to different loggers based on content
+            if result and result.get('status') == 'success':
+                logger.info(
+                    f"Prediction: {json.dumps(log_entry, ensure_ascii=False, indent=None)}")
+            else:
+                error_logger.error(
+                    f"Failed prediction: {json.dumps(log_entry, ensure_ascii=False, indent=None)}")
+
+            # Log model-specific metrics
+            model_logger.info(
+                f"Model inference - Time: {inference_time:.3f}s, Confidence: {confidence:.3f}, File: {filename}")
+
+        except UnicodeEncodeError as e:
+            # Fallback logging with ASCII encoding if Unicode fails
+            logger.warning(f"Unicode encoding error in logging: {e}")
+            safe_log_entry = {
+                "timestamp": log_entry["timestamp"],
+                "filename": filename,
+                "inference_time": inference_time,
+                "confidence": confidence,
+                "model_version": "1.0.0",
+                "success": log_entry["success"],
+                "unicode_error": "Vietnamese text removed due to encoding issues"
+            }
+            logger.info(
+                f"Prediction (safe): {json.dumps(safe_log_entry, ensure_ascii=True)}")
 
         # Store in feature store (for demo purposes)
         self.feature_store[datetime.now().isoformat()] = log_entry
+
+    def _setup_events(self):
+        """Setup FastAPI startup and shutdown events."""
+
+        @self.app.on_event("startup")
+        async def startup_event():
+            """Handle application startup."""
+            logger.info("Starting Vietnamese ID Card API")
+
+            # Start system metrics collection
+            self.metrics_collector.start_collection()
+
+            # Initialize model loading status metrics
+            for model_name in self.model_manager.models:
+                model = self.model_manager.models[model_name]
+                status = 1 if model is not None else 0
+                MODEL_LOADING_STATUS.labels(model_name=model_name).set(status)
+
+            logger.info("API startup completed")
+
+        @self.app.on_event("shutdown")
+        async def shutdown_event():
+            """Handle application shutdown."""
+            logger.info(
+                # Stop system metrics collection
+                "Shutting down Vietnamese ID Card API")
+            self.metrics_collector.stop_collection()
+
+            logger.info("API shutdown completed")
 
     def run(self, host: str = "0.0.0.0", port: int = 8080, metrics_port: int = 8000):
         """Run the FastAPI application."""
@@ -543,7 +713,12 @@ class IDCardAPI:
 
         # Start FastAPI server
         logger.info(f"Starting API server on {host}:{port}")
-        uvicorn.run(self.app, host=host, port=port)
+
+        try:
+            uvicorn.run(self.app, host=host, port=port)
+        finally:
+            # Stop metrics collection on shutdown
+            self.metrics_collector.stop_collection()
 
 
 def create_app(api_key: Optional[str] = None) -> FastAPI:

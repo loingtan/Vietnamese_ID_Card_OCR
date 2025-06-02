@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vnidcard-app
+  labels:
+    app: vnidcard-app
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vnidcard-app
+  template:
+    metadata:
+      labels:
+        app: vnidcard-app
+        version: v1
+    spec:
+      containers:
+        - name: vnidcard-app
+          image: k3d-vnidcard-registry:5001/vnidcard-app:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: api
+              protocol: TCP
+            - containerPort: 8000
+              name: metrics
+              protocol: TCP
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: API_HOST
+              value: "0.0.0.0"
+            - name: API_PORT
+              value: "8080"
+            - name: METRICS_PORT
+              value: "8000"
+            - name: ENABLE_STREAMLIT
+              value: "false"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+            - name: app-logs
+              mountPath: /app/logs
+      volumes:
+        - name: app-data
+          emptyDir: {}
+        - name: app-logs
+          emptyDir: {}
+      restartPolicy: Always
