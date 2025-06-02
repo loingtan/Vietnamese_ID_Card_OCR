@@ -304,7 +304,7 @@ if __name__ == "__main__":
             epochs=cfg['EPOCHS'],
             imgsz=cfg['IMGSZ'],
             device=device,
-            pretrained=True if not model_path else False,
+            pretrained=bool(model_path),
             cache='disk',
         )
         
@@ -342,14 +342,14 @@ if __name__ == "__main__":
                         )
                     print(f"✅ Set tags for version {registered_model.version}: {cfg['SAVE_TAGS']}")
                 
-                # Update config with new version info
-                if hasattr(config, 'update_model_artifact_info'):
-                    config.update_model_artifact_info(
-                        cfg['MODEL_KEY'],
-                        run_id=run.info.run_id,
-                        version=str(registered_model.version),
-                        artifact_path="train/weights"
-                    )
+                # # Update config with new version info
+                # if hasattr(config, 'update_model_artifact_info'):
+                #     config.update_model_artifact_info(
+                #         cfg['MODEL_KEY'],
+                #         run_id=run.info.run_id,
+                #         version=str(registered_model.version),
+                #         artifact_path="train/weights"
+                #     )
                     
             except Exception as e:
                 print(f"⚠️ Failed to register model: {e}")

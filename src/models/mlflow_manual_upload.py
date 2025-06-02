@@ -18,7 +18,7 @@ MLFLOW_TRACKING_URI = config.MLFLOW_TRACKING_URI
 EXPERIMENT_NAME = "Manual-Upload"
 
 # Use paths from Config
-LOCAL_MODEL_WEIGHTS = config.get_model_paths()
+LOCAL_MODEL_WEIGHTS = config.get_train_model_paths()
 
 # Use MLflow artifact config from Config
 MLFLOW_MODEL_ARTIFACTS = config.MLFLOW_MODEL_ARTIFACTS

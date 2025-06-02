@@ -51,7 +51,8 @@ class ModelManager:
         
         # Initialize models dict and get paths
         self.models = {}
-        self.local_weights = self.config.get_model_paths()
+        # self.local_weights = self.config.get_model_paths()
+        self.local_weights = self.config.get_train_model_paths()
         
         # Set API key
         self.api_key = api_key or getattr(self.config, 'GEMINI_API_KEY', None)
@@ -63,37 +64,37 @@ class ModelManager:
         # Load all models
         self._load_all_models()
 
-    def _load_config(self, config):
-        """Load configuration from provided config or get_config()."""
-        try:
-            if CONFIG_AVAILABLE and config is None and get_config is not None:
-                return get_config()
-            return config
-        except Exception as e:
-            logger.warning(f"Error loading config: {e}")
-            return config
+    # def _load_config(self, config):
+    #     """Load configuration from provided config or get_config()."""
+    #     try:
+    #         if CONFIG_AVAILABLE and config is None and get_config is not None:
+    #             return get_config()
+    #         return config
+    #     except Exception as e:
+    #         logger.warning(f"Error loading config: {e}")
+    #         return config
 
-    def _setup_device(self):
-        """Setup device based on config and available hardware."""
-        if (self.config and 
-            hasattr(self.config, 'models') and 
-            hasattr(self.config.models, 'device') and 
-            self.config.models.device != "auto"):
-            return self.config.models.device
+    # def _setup_device(self):
+    #     """Setup device based on config and available hardware."""
+    #     if (self.config and 
+    #         hasattr(self.config, 'models') and 
+    #         hasattr(self.config.models, 'device') and 
+    #         self.config.models.device != "auto"):
+    #         return self.config.models.device
         
-        return "cuda" if torch.cuda.is_available() and not self.config.FORCE_CPU else "cpu"
+    #     return "cuda" if torch.cuda.is_available() and not self.config.FORCE_CPU else "cpu"
 
-    def _setup_api_key(self, api_key):
-        """Setup API key from provided key or config."""
-        try:
-            return api_key or (
-                self.config.google_ai_api_key 
-                if self.config and hasattr(self.config, 'google_ai_api_key') 
-                else None
-            )
-        except Exception as e:
-            logger.warning(f"Error setting up API key: {e}")
-            return api_key
+    # def _setup_api_key(self, api_key):
+    #     """Setup API key from provided key or config."""
+    #     try:
+    #         return api_key or (
+    #             self.config.google_ai_api_key 
+    #             if self.config and hasattr(self.config, 'google_ai_api_key') 
+    #             else None
+    #         )
+    #     except Exception as e:
+    #         logger.warning(f"Error setting up API key: {e}")
+    #         return api_key
 
     def _get_model_weights_path(self, model_key: str, download_dir: str = "./.temp/serving", model_version: str = "1") -> str:
         """Get model weights path, trying MLflow first then falling back to local."""
