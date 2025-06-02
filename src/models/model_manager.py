@@ -17,13 +17,13 @@ logger = logging.getLogger(__name__)
 import mlflow
 from src.config import get_config
 
-try:
-    from config.settings import get_config
-    CONFIG_AVAILABLE = True
-except (ImportError, Exception) as e:
+# try:
+#     from config.settings import get_config
+#     CONFIG_AVAILABLE = True
+# except (ImportError, Exception) as e:
 
-    CONFIG_AVAILABLE = False
-    get_config = None
+#     CONFIG_AVAILABLE = False
+#     get_config = None
 
 
 class ModelManager:
@@ -35,22 +35,29 @@ class ModelManager:
             config (Config, optional): Configuration object. Defaults to None.
         """
         # Load configuration
-        self.config = self._load_config(config)
-        
+        try:
+            from src.config import Config, get_config
+            self.config = config if config is not None else get_config()
+            if not isinstance(self.config, Config):
+                raise TypeError(f"Config must be instance of Config, got {type(self.config)}")
+        except Exception as e:
+            logger.error(f"Failed to load configuration: {e}")
+            raise RuntimeError("Could not initialize model manager: configuration error")
+
         # Set device
-        self.device = self._setup_device()
+        self.device = ("cuda" if torch.cuda.is_available() 
+                      and not getattr(self.config, 'FORCE_CPU', False) 
+                      else "cpu")
         
-        # Initialize models dict
+        # Initialize models dict and get paths
         self.models = {}
-        
-        # Set API key
-        self.api_key = self._setup_api_key(api_key)
-        
-        # Get model weights paths
         self.local_weights = self.config.get_model_paths()
         
+        # Set API key
+        self.api_key = api_key or getattr(self.config, 'GEMINI_API_KEY', None)
+        
         # Setup MLflow if enabled
-        if self.config.MLFLOW_ENABLED:
+        if getattr(self.config, 'MLFLOW_ENABLED', False):
             mlflow.set_tracking_uri(self.config.MLFLOW_TRACKING_URI)
         
         # Load all models
@@ -138,15 +145,15 @@ class ModelManager:
             except Exception as e:
                 print(f"MLflow download failed for {model_key}: {e}")
 
-        # Simple fallback to local weights - no searching
+        # Simple fallback to local weights
         try:
             local_path = self.local_weights[model_key]
             if not local_path:
-                raise FileNotFoundError(f"No local path configured for {model_key}")
+                raise FileNotFoundError(f"No local path configured for {model_key}\n")
             
             local_path = Path(local_path)
             if not local_path.exists():
-                raise FileNotFoundError(f"Local weights not found at: {local_path}")
+                raise FileNotFoundError(f"Local weights not found at: {local_path}\n")
             if local_path.suffix != '.pt':
                 raise ValueError(f"Local weights file is not a .pt file: {local_path}")
                 
@@ -177,44 +184,55 @@ class ModelManager:
             logger.error(f"Error loading VietOCR model: {e}")
             return None
 
-    def _load_yolo_text_detection_model(self):
+    def _load_yolo_model(self, model_key: str, task: str = "detect") -> YOLO:
+        """Generic YOLO model loader that handles both PT and ONNX formats.
+        
+        Args:
+            model_key (str): Key for model lookup
+            task (str, optional): YOLO task type. Defaults to "detect".
+        """
         try:
-            model_path = self._get_model_weights_path("yolo_text_detect")
+            model_path = Path(self._get_model_weights_path(model_key))
             if not model_path.exists():
                 raise FileNotFoundError(f"Model file not found: {model_path}")
 
-            model = YOLO(str(model_path))
-            model.to(self.device)
+            # If PT file, convert to ONNX first
+            if model_path.suffix == '.pt':
+                onnx_path = model_path.with_suffix('.onnx')
+                if not onnx_path.exists():
+                    logger.info(f"Converting {model_path} to ONNX format...")
+                    model = YOLO(str(model_path), task=task)
+                    model.export(
+                        format='onnx',
+                        simplify=True,
+                        dynamic=True,
+                        # half=True,
+                        device=self.device
+                    )
+                    logger.info(f"Model converted and saved to: {onnx_path}")
+                model_path = onnx_path
+
+            # Initialize YOLO with ONNX model
+            model = YOLO(str(model_path), task=task)
+            logger.info(f"Loaded YOLO model from: {model_path}")
             return model
+
         except Exception as e:
-            logger.error(f"Error loading YOLO text detection model: {e}")
+            logger.error(f"Error loading YOLO model {model_key}: {e}")
             return None
+
+    def _load_yolo_text_detection_model(self):
+        """Load YOLO text detection model."""
+        return self._load_yolo_model("yolo_text_detect", task="detect")
 
     def _load_yolo_text_detection_model_v2(self):
-        try:
-            model_path = self._get_model_weights_path("yolo_text_detect_v2")
-            if not model_path.exists():
-                raise FileNotFoundError(f"Model file not found: {model_path}")
-
-            model = YOLO(str(model_path))
-            model.to(self.device)
-            return model
-        except Exception as e:
-            logger.error(f"Error loading YOLO text detection model v2: {e}")
-            return None
+        """Load YOLO text detection model v2."""
+        return self._load_yolo_model("yolo_text_detect_v2", task="detect")
 
     def _load_yolo_corner_detection_model(self):
-        try:
-            model_path = self._get_model_weights_path("yolo_corner_detect")
-            if not model_path.exists():
-                raise FileNotFoundError(f"Model file not found: {model_path}")
-
-            model = YOLO(str(model_path))
-            model.to(self.device)
-            return [model]  # Return as list for compatibility
-        except Exception as e:
-            logger.error(f"Error loading YOLO corner detection model: {e}")
-            return None
+        """Load YOLO corner detection model."""
+        model = self._load_yolo_model("yolo_corner_detect", task="detect")
+        return [model] if model else None  # Return as list for compatibility
 
     def _load_text_correction_model(self):
         try:

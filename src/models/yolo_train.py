@@ -269,7 +269,7 @@ if __name__ == "__main__":
     # Try local weights if MLflow download fails
     if not model_path or not Path(model_path).exists():
         try:
-            local_paths = config.get_model_paths()
+            local_paths = config.get_train_model_paths()
             model_path = local_paths.get(cfg['MODEL_KEY'])
             if model_path and Path(model_path).exists():
                 print(f"Using local weights: {model_path}")

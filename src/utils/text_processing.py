@@ -19,7 +19,7 @@ except ImportError:
     config.DEFAULT_CONFIDENCE_THRESHOLD = 0.5
 
 
-def load_vietnamese_dictionary(dict_path: str = r'dictionary\dictionaries\hongocduc\words.txt') -> Set[str]:
+def load_vietnamese_dictionary(dict_path: str = r'data/dictionary/dictionaries/hongocduc/words.txt') -> Set[str]:
     """
     Load Vietnamese dictionary for text correction.
 
