@@ -15,6 +15,8 @@ import uuid
 import time
 from datetime import datetime
 import logging
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..models.model_manager import ModelManager
 from ..core.id_card_processor import IDCardProcessor
@@ -131,22 +133,6 @@ class StreamlitUI:
             index=0
         )
 
-        # Batch processing options
-        with st.sidebar.expander("📦 Batch Processing Settings"):
-            batch_size = st.number_input(
-                "Maximum Images per Batch",
-                min_value=1,
-                max_value=10,
-                value=5,
-                help="Maximum number of images to process in one batch"
-            )
-            
-            parallel_processing = st.checkbox(
-                "Enable Parallel Processing",
-                value=False,
-                help="Process multiple images simultaneously (experimental)"
-            )
-
         # Advanced settings
         with st.sidebar.expander("⚡ Advanced Settings"):
             confidence_threshold = st.slider(
@@ -176,9 +162,7 @@ class StreamlitUI:
             'processing_method': processing_method,
             'confidence_threshold': confidence_threshold,
             'nms_threshold': nms_threshold,
-            'enhance_image': enhance_image,
-            'batch_size': batch_size,
-            'parallel_processing': parallel_processing
+            'enhance_image': enhance_image
         }
 
     def initialize_models(self, api_key: str = None):
@@ -211,46 +195,79 @@ class StreamlitUI:
         with col2:
             st.metric("Languages", "Vietnamese")
 
+    def process_single_image(self, image: np.ndarray, idx: int, total_images: int) -> Dict[str, Any]:
+        """Process a single image with progress tracking."""
+        try:
+            # Process the image
+            result = self.processor.process_id_card(image)
+            if result and 'extracted_info' in result:
+                return {
+                    'status': 'success',
+                    'extracted_info': result['extracted_info'],
+                    'message': 'Successfully processed',
+                    'index': idx
+                }
+            else:
+                return {
+                    'status': 'error',
+                    'message': 'Failed to extract information',
+                    'index': idx
+                }
+        except Exception as e:
+            logger.error(f"Error processing image {idx + 1}: {e}")
+            return {
+                'status': 'error',
+                'message': f"Error: {str(e)}",
+                'index': idx
+            }
+
     def process_batch_images(self, images: List[np.ndarray]) -> List[Dict[str, Any]]:
-        """Process a batch of images."""
+        """Process a batch of images using multithreading."""
         results = []
         total_images = len(images)
         
         # Create progress bar
         progress_bar = st.progress(0)
         status_text = st.empty()
+        processed_count = 0
         
-        for idx, image in enumerate(images):
-            status_text.text(f"Processing image {idx + 1} of {total_images}")
-            
-            try:
-                # Process the image
-                result = self.processor.process_id_card(image)
-                if result and 'extracted_info' in result:
-                    results.append({
-                        'status': 'success',
-                        'extracted_info': result['extracted_info'],
-                        'message': 'Successfully processed'
-                    })
-                else:
-                    results.append({
-                        'status': 'error',
-                        'message': 'Failed to extract information'
-                    })
-            except Exception as e:
-                logger.error(f"Error processing image {idx + 1}: {e}")
-                results.append({
-                    'status': 'error',
-                    'message': f"Error: {str(e)}"
-                })
-            
-            # Update progress
-            progress_bar.progress((idx + 1) / total_images)
+        # Automatically determine if we should use multithreading
+        # Use multithreading if we have more than 1 image
+        max_workers = min(os.cpu_count() or 4, total_images) if total_images > 1 else 1
         
-        # Clear progress indicators
-        progress_bar.empty()
-        status_text.empty()
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                future_to_image = {
+                    executor.submit(self.process_single_image, image, idx, total_images): idx 
+                    for idx, image in enumerate(images)
+                }
+                
+                # Process completed tasks as they finish
+                for future in as_completed(future_to_image):
+                    result = future.result()
+                    results.append(result)
+                    processed_count += 1
+                    
+                    # Update progress
+                    progress = processed_count / total_images
+                    progress_bar.progress(progress)
+                    status_text.text(f"Processing image {processed_count} of {total_images}")
+                    
+                    # Log progress
+                    logger.info(f"Completed processing image {processed_count}/{total_images}")
         
+        except Exception as e:
+            logger.error(f"Error in batch processing: {e}")
+            st.error(f"Error in batch processing: {str(e)}")
+        
+        finally:
+            # Clear progress indicators
+            progress_bar.empty()
+            status_text.empty()
+        
+        # Sort results by original index to maintain order
+        results.sort(key=lambda x: x.get('index', 0))
         return results
 
     def upload_images(self) -> Tuple[List[np.ndarray], Any]:
@@ -506,11 +523,6 @@ class StreamlitUI:
         images, results_container = self.upload_images()
 
         if images:
-            # Limit batch size
-            if len(images) > config['batch_size']:
-                st.warning(f"⚠️ Maximum {config['batch_size']} images allowed. Only the first {config['batch_size']} images will be processed.")
-                images = images[:config['batch_size']]
-
             # Process button
             if st.button("🚀 Process ID Cards", type="primary"):
                 with st.spinner("Processing images... Please wait."):

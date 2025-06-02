@@ -29,6 +29,8 @@ import uuid
 import socket
 from pydantic import BaseModel
 import threading
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Try relative imports first, fallback to absolute imports for testing
 try:
@@ -213,6 +215,44 @@ class IDCardAPI:
         # Include webhook handlers
         self.app.include_router(alert_router)
 
+    def _process_single_image(self, image: np.ndarray, filename: str, config: ProcessingConfig) -> Dict[str, Any]:
+        """Process a single image with error handling."""
+        try:
+            start_time = time.time()
+            result = self.processor.process_id_card(image)
+            inference_time = time.time() - start_time
+            
+            if result and 'extracted_info' in result:
+                # Log successful prediction
+                self._log_prediction(result, filename, inference_time)
+                
+                # Check for duplicate ID
+                id_number = result['extracted_info'].get('id_number')
+                if id_number:
+                    duplicate_info = self._check_duplicate_id(id_number)
+                    result['duplicate_info'] = duplicate_info
+                
+                return {
+                    'status': 'success',
+                    'extracted_info': result['extracted_info'],
+                    'message': 'Successfully processed',
+                    'filename': filename,
+                    'processing_time': inference_time
+                }
+            else:
+                return {
+                    'status': 'error',
+                    'message': 'Failed to extract information',
+                    'filename': filename
+                }
+        except Exception as e:
+            logger.error(f"Error processing image {filename}: {e}")
+            return {
+                'status': 'error',
+                'message': f"Error: {str(e)}",
+                'filename': filename
+            }
+
     def _setup_routes(self):
         """Setup API routes."""
 
@@ -324,105 +364,87 @@ class IDCardAPI:
         @self.app.post("/process-batch/")
         async def process_batch(
             files: List[UploadFile] = File(...),
-            config: ProcessingConfig = Depends(),
-            max_batch_size: int = Query(5, ge=1, le=10)
+            config: ProcessingConfig = Depends()
         ) -> Dict[str, Any]:
             """
-            Process multiple Vietnamese ID card images in batch.
+            Process multiple Vietnamese ID card images in parallel.
 
             Args:
                 files: List of uploaded image files
                 config: Processing configuration
-                max_batch_size: Maximum number of images to process
 
             Returns:
-                JSON response with batch processing results
+                JSON response with extracted information for all images
             """
             start_time = time.time()
             BATCH_REQUEST_COUNT.inc()
-
+            
             try:
-                # Limit batch size
-                if len(files) > max_batch_size:
-                    files = files[:max_batch_size]
-
-                results = []
-                for idx, file in enumerate(files):
-                    try:
-                        # Validate file type
-                        if not file.content_type.startswith('image/'):
-                            results.append({
-                                'status': 'error',
-                                'message': f"File {file.filename} must be an image"
-                            })
-                            continue
-
-                        # Read and process image
-                        contents = await file.read()
-                        nparr = np.frombuffer(contents, np.uint8)
-                        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-                        if image is None:
-                            results.append({
-                                'status': 'error',
-                                'message': f"Could not decode image file {file.filename}"
-                            })
-                            continue
-
-                        # Process image
-                        result = self.processor.process_id_card(image)
-                        
-                        # Check for duplicate ID
-                        if result.get('status') == 'success':
-                            id_number = result.get('extracted_info', {}).get('id_number')
-                            if id_number:
-                                duplicate_info = self._check_duplicate_id(id_number)
-                                if duplicate_info.get('is_duplicate'):
-                                    result['duplicate_info'] = duplicate_info
-
-                        # Save to database
-                        session_id = str(uuid.uuid4())
-                        ocr_result = OCRResult(
-                            session_id=session_id,
-                            image_filename=file.filename,
-                            extracted_info=result.get('extracted_info', {}),
-                            processing_time=0.0,
-                            confidence_scores=result.get('confidence_scores', {}),
-                            detected_text_regions=result.get('detected_regions', []),
-                            success=True
+                # Validate all files
+                for file in files:
+                    if not file.content_type.startswith('image/'):
+                        ERROR_COUNT.inc()
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"File {file.filename} must be an image"
                         )
-                        
-                        result_id = self.db_client.save_ocr_result(ocr_result)
-                        result['database_id'] = result_id
-                        result['session_id'] = session_id
-
+                
+                # Read all images
+                images = []
+                for file in files:
+                    contents = await file.read()
+                    nparr = np.frombuffer(contents, np.uint8)
+                    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    if image is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Could not decode image {file.filename}"
+                        )
+                    images.append((image, file.filename))
+                
+                # Process images in parallel
+                results = []
+                total_images = len(images)
+                
+                # Automatically determine number of workers based on CPU cores
+                max_workers = min(os.cpu_count() or 4, total_images)
+                
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submit all tasks
+                    future_to_image = {
+                        executor.submit(self._process_single_image, image, filename, config): (image, filename)
+                        for image, filename in images
+                    }
+                    
+                    # Process completed tasks as they finish
+                    for future in as_completed(future_to_image):
+                        result = future.result()
                         results.append(result)
-
-                    except Exception as e:
-                        logger.error(f"Error processing image {file.filename}: {str(e)}")
-                        results.append({
-                            'status': 'error',
-                            'message': f"Error processing {file.filename}: {str(e)}"
-                        })
-
+                        
+                        # Log progress
+                        logger.info(f"Completed processing {len(results)}/{total_images} images")
+                
                 # Calculate total processing time
-                processing_time = time.time() - start_time
-                PROCESSING_TIME.observe(processing_time)
-
-                return {
+                total_time = time.time() - start_time
+                
+                # Prepare response
+                response = {
                     'status': 'success',
-                    'total_images': len(files),
+                    'total_images': total_images,
                     'processed_images': len(results),
-                    'processing_time': processing_time,
+                    'total_processing_time': total_time,
                     'results': results
                 }
-
+                
+                SUCCESS_COUNT.inc()
+                return response
+                
             except Exception as e:
                 ERROR_COUNT.inc()
-                logger.error(f"Error processing batch: {str(e)}")
+                logger.error(f"Error in batch processing: {e}")
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Internal server error: {str(e)}"
+                    detail=f"Error processing batch: {str(e)}"
                 )
 
         @self.app.get("/history/{session_id}")
