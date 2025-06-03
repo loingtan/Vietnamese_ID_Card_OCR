@@ -442,8 +442,6 @@ class StreamlitUI:
                                         image_filename=f"uploaded_image_{idx+1}.jpg",
                                         extracted_info=extracted_info,
                                         processing_time=0.0,
-                                        confidence_scores={},
-                                        detected_text_regions=[],
                                         success=True
                                     )
                                     result_id = self.db_client.save_ocr_result(

@@ -333,22 +333,13 @@ class IDCardAPI:
                 # Create OCR result for MongoDB
                 PROCESSING_TIME.observe(processing_time)
 
-                if result.get('status') == 'success':
-                    SUCCESS_COUNT.inc()
+                # Check for duplicate ID
+                id_number = result.get('extracted_info', {}).get('id_number')
+                duplicate_info = None
+                if id_number:
+                    duplicate_info = self._check_duplicate_id(id_number)
 
-                    # Check for duplicate ID
-                    id_number = result.get(
-                        'extracted_info', {}).get('id_number')
-                    if id_number:
-                        duplicate_info = self._check_duplicate_id(id_number)
-                        if duplicate_info.get('is_duplicate'):
-                            result['duplicate_info'] = duplicate_info
-                else:
-                    ERROR_COUNT.inc()
-                    error_message = result.get('error', 'Unknown error')
-                    error_logger.error(
-                        # Save to database
-                        f"Failed prediction for {file.filename}: {result.get('error', 'Unknown error')}")
+                # Save to database
                 session_id = str(uuid.uuid4())
                 ocr_result = OCRResult(
                     session_id=session_id,
@@ -359,10 +350,21 @@ class IDCardAPI:
                 )
 
                 result_id = self.db_client.save_ocr_result(ocr_result)
-                result['database_id'] = result_id
-                result['session_id'] = session_id
+                
+                # Prepare response
+                response = {
+                    'status': 'success',
+                    'extracted_info': result.get('extracted_info', {}),
+                    'database_id': result_id,
+                    'session_id': session_id,
+                    'is_duplicate': duplicate_info.get('is_duplicate', False) if duplicate_info else False,
+                    'processing_time': processing_time
+                }
 
-                return result
+                if duplicate_info and duplicate_info.get('is_duplicate'):
+                    response['duplicate_info'] = duplicate_info
+
+                return response
 
             except HTTPException:
                 raise
@@ -421,11 +423,42 @@ class IDCardAPI:
                     # Process completed tasks as they finish
                     for future in as_completed(future_to_image):
                         result = future.result()
-                        results.append(result)
+                        
+                        # Check for duplicate ID
+                        id_number = result.get('extracted_info', {}).get('id_number')
+                        duplicate_info = None
+                        if id_number:
+                            duplicate_info = self._check_duplicate_id(id_number)
+
+                        # Save to database
+                        session_id = str(uuid.uuid4())
+                        ocr_result = OCRResult(
+                            session_id=session_id,
+                            image_filename=result.get('filename', 'unknown'),
+                            extracted_info=result.get('extracted_info', {}),
+                            processing_time=result.get('processing_time', 0.0),
+                            success=result.get('status') == 'success'
+                        )
+
+                        result_id = self.db_client.save_ocr_result(ocr_result)
+
+                        # Prepare response for each image
+                        processed_result = {
+                            'status': 'success',
+                            'extracted_info': result.get('extracted_info', {}),
+                            'database_id': result_id,
+                            'session_id': session_id,
+                            'is_duplicate': duplicate_info.get('is_duplicate', False) if duplicate_info else False,
+                            'processing_time': result.get('processing_time', 0.0)
+                        }
+
+                        if duplicate_info and duplicate_info.get('is_duplicate'):
+                            processed_result['duplicate_info'] = duplicate_info
+
+                        results.append(processed_result)
 
                         # Log progress
-                        logger.info(
-                            f"Completed processing {len(results)}/{total_images} images")
+                        logger.info(f"Completed processing {len(results)}/{total_images} images")
 
                 # Calculate total processing time
                 total_time = time.time() - start_time
@@ -484,8 +517,9 @@ class IDCardAPI:
                 raise HTTPException(
                     status_code=500,
                     detail=f"Error searching by ID: {str(e)}"
-                )        @ self.app.get("/health")        @ self.app.get("/health")
+                )
 
+        @self.app.get("/health")
         async def health_check():
             """Health check endpoint."""
             # Filter out gemini_client from models count
@@ -512,8 +546,9 @@ class IDCardAPI:
                 return Response(
                     "# Error generating metrics\n",
                     media_type=CONTENT_TYPE_LATEST
-                )        @ self.app.get("/stats")
+                )
 
+        @self.app.get("/stats")
         async def get_stats():
             """Get current API statistics."""
             # Filter out gemini_client from models list
@@ -578,7 +613,8 @@ class IDCardAPI:
                 if filename:
                     filter_criteria["image_filename"] = {
                         "$regex": filename, "$options": "i"}
-                  # Get OCR results from MongoDB with filters
+
+                # Get OCR results from MongoDB with filters
                 results = self.db_client.get_all_ocr_results(
                     limit=limit,
                     skip=skip,
@@ -587,17 +623,32 @@ class IDCardAPI:
                     filter_criteria=filter_criteria
                 )
 
+                # Clean up results by removing unnecessary fields
+                cleaned_results = []
+                for result in results:
+                    # Create a new dict with only the fields we want
+                    cleaned_result = {
+                        'session_id': result.get('session_id'),
+                        'image_filename': result.get('image_filename'),
+                        'extracted_info': result.get('extracted_info', {}),
+                        'processing_time': result.get('processing_time'),
+                        'success': result.get('success'),
+                        'error_message': result.get('error_message'),
+                        'timestamp': result.get('timestamp')
+                    }
+                    cleaned_results.append(cleaned_result)
+
                 # Get filtered count for pagination
                 total_count = self.db_client.get_ocr_results_count(
                     filter_criteria)
                 logger.info(
-                    f"Retrieved {len(results)} complete OCR data records from MongoDB")
+                    f"Retrieved {len(cleaned_results)} complete OCR data records from MongoDB")
 
                 return {
                     "status": "success",
-                    "message": f"Retrieved {len(results)} complete OCR records",
-                    "results": results,
-                    "count": len(results),
+                    "message": f"Retrieved {len(cleaned_results)} complete OCR records",
+                    "results": cleaned_results,
+                    "count": len(cleaned_results),
                     "pagination": {
                         "limit": limit,
                         "skip": skip,
@@ -609,8 +660,9 @@ class IDCardAPI:
                 raise HTTPException(
                     status_code=500,
                     detail=f"Failed to retrieve OCR history: {str(e)}"
-                )        @ self.app.get("/models")
+                )
 
+        @self.app.get("/models")
         async def get_model_info():
             """Get information about loaded models."""
             # Filter out gemini_client from models info
