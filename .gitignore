@@ -1,6 +1,8 @@
 .venv/*
 .idea/*
 .vscode/*
+.*/
+!.dvc/
 # Python cache
 __pycache__/
 *.py[cod]
@@ -12,5 +14,27 @@ __pycache__/
 .venv/
 venv/
 env/
+# Log files
+*.log
+app.log
+streamlit.log
 api.log
+# Build and distribution
+*.egg-info/
+dist/
+build/
+# Data and model directories
+data/
+logs/
+yolo_detect_text/
+corner_detection_model/
+# Environment variables
 .env
+mlruns
+mlartifacts
+models/*/datasets/test
+models/*/datasets/*.zip
+models/*/datasets/*.ipynb
+runs/
+**/labels.cache
+logs/

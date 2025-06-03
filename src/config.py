@@ -7,33 +7,39 @@ import os
 from pathlib import Path
 from typing import Dict, Any
 
-# Import the new configuration system
-try:
-    from ..config.settings import get_config, AppConfig
-    NEW_CONFIG_AVAILABLE = True
-except ImportError:
-    NEW_CONFIG_AVAILABLE = False
+# # Import the new configuration system
+# try:
+#     from ..config.settings import get_config, AppConfig
+#     NEW_CONFIG_AVAILABLE = True
+# except ImportError:
+#     NEW_CONFIG_AVAILABLE = False
 
 
 class Config:
     """Configuration class for the application (legacy compatibility)."""
 
+    # Add class-level path definitions
+    BASE_DIR = Path(__file__).parent.parent
+    MODEL_DIR = BASE_DIR / "models"
+    DATA_DIR = BASE_DIR / "data"
+    LOGS_DIR = BASE_DIR / "logs"
+
+    # Model paths as class attributes
+    YOLO_CORNER_MODEL_PATH = MODEL_DIR / \
+        "yolo_corner_detect/weights/29_03_25-YOLOv11n-Corner-best_metrics.onnx"
+    YOLO_TEXT_MODEL_PATH = MODEL_DIR / "yolo_text_detect/weights/best.onnx"
+    YOLO_TEXT_V2_MODEL_PATH = MODEL_DIR / "yolo_text_detect_v2/weights/bestv2.onnx"
+    DICTIONARY_PATH = DATA_DIR / "dictionary/dictionaries/hongocduc/words.txt"
+
+    # Training paths as class attributes
+    YOLO_TRAIN_CORNER_MODEL_PATH = MODEL_DIR / \
+        "yolo_corner_detect/weights/29_03_25-YOLOv11n-Corner-best_metrics.pt"
+    YOLO_TRAIN_TEXT_MODEL_PATH = MODEL_DIR / "yolo_text_detect/weights/best.pt"
+    YOLO_TRAIN_TEXT_V2_MODEL_PATH = MODEL_DIR / \
+        "yolo_text_detect_v2/weights/bestv2.pt"
+
     def __init__(self):
-        """Initialize configuration with environment variables."""
-        # Base paths
-        self.BASE_DIR = Path(__file__).parent.parent
-        self.MODEL_DIR = self.BASE_DIR / "models"
-        self.DATA_DIR = self.BASE_DIR / "data"
-        self.LOGS_DIR = self.BASE_DIR / "logs"
-
-        # Model paths
-        self.YOLO_CORNER_MODEL_PATH = self.BASE_DIR / "corner_detection_model" / \
-            "weight" / "29_03_25-YOLOv11n-Corner-best_metrics.pt"
-        self.YOLO_TEXT_MODEL_PATH = self.BASE_DIR / "yolo_detect_text" / "best.pt"
-        self.YOLO_TEXT_V2_MODEL_PATH = self.BASE_DIR / "yolo_detect_text" / "bestv2.pt"
-        self.DICTIONARY_PATH = self.BASE_DIR / "dictionary" / \
-            "dictionaries" / "hongocduc" / "words.txt"
-
+        """Initialize instance-specific configuration."""
         # API Configuration
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
         self.API_HOST = os.getenv("API_HOST", "0.0.0.0")
@@ -65,32 +71,94 @@ class Config:
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         self.LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-    def ensure_directories(self):
-        """Ensure all required directories exist."""
-        for directory in [self.MODEL_DIR, self.DATA_DIR, self.LOGS_DIR]:
-            directory.mkdir(parents=True, exist_ok=True)
-
-    def get_model_paths(self) -> Dict[str, Path]:
-        """Get dictionary of model paths."""
-        return {
-            "yolo_corner": self.YOLO_CORNER_MODEL_PATH,
-            "yolo_text": self.YOLO_TEXT_MODEL_PATH,
-            "yolo_text_v2": self.YOLO_TEXT_V2_MODEL_PATH,
-            "dictionary": self.DICTIONARY_PATH
+        # DVC
+        self.YOLO_CORNER_MODEL_DATASET = self.MODEL_DIR / "yolo_corner_detect" / "datasets"
+        self.YOLO_TEXT_MODEL_DATASET = self.MODEL_DIR / "yolo_text_detect" / "datasets"
+        self.YOLO_TEXT_MODEL_V2_DATASET = self.MODEL_DIR / \
+            "yolo_text_detect_v2" / "datasets"        # === MLflow Integration ===
+        self.MLFLOW_ENABLED = os.getenv(
+            "MLFLOW_ENABLED", "false").lower() == "true"
+        self.MLFLOW_TRACKING_URI = os.getenv(
+            "MLFLOW_TRACKING_URI", "http://localhost:5000")
+        self.MLFLOW_MODEL_ARTIFACTS = {
+            "yolo_text_detect": {
+                "version": "1",
+                "run_id": os.getenv("MLFLOW_RUN_YOLO_TEXT", ""),
+                "artifact_path": ""
+            },
+            "yolo_text_detect_v2": {
+                "version": "1",
+                "run_id": os.getenv("MLFLOW_RUN_YOLO_TEXT_V2", ""),
+                "artifact_path": ""
+            },
+            "yolo_corner_detect": {
+                "version": "1",
+                "run_id": os.getenv("MLFLOW_RUN_YOLO_CORNER", ""),
+                "artifact_path": ""
+            }
         }
 
-    def validate_setup(self) -> Dict[str, bool]:
+    @classmethod
+    def ensure_directories(cls):
+        """Ensure all required directories exist."""
+        for directory in [cls.MODEL_DIR, cls.DATA_DIR, cls.LOGS_DIR]:
+            directory.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def get_train_model_paths(cls) -> Dict[str, Path]:
+        """Get dictionary of training model paths."""
+        return {
+            "yolo_corner_detect": cls.YOLO_TRAIN_CORNER_MODEL_PATH,
+            "yolo_text_detect": cls.YOLO_TRAIN_TEXT_MODEL_PATH,
+            "yolo_text_detect_v2": cls.YOLO_TRAIN_TEXT_V2_MODEL_PATH,
+        }
+
+    @classmethod
+    def get_model_paths(cls) -> Dict[str, Path]:
+        """Get dictionary of model paths."""
+        return {
+            "yolo_corner_detect": cls.YOLO_CORNER_MODEL_PATH,
+            "yolo_text_detect": cls.YOLO_TEXT_MODEL_PATH,
+            "yolo_text_detect_v2": cls.YOLO_TEXT_V2_MODEL_PATH,
+            "dictionary": cls.DICTIONARY_PATH
+        }
+
+    @classmethod
+    def get_mlflow_model_config(cls) -> Dict[str, Dict[str, str]]:
+        """Return MLflow model mapping (run_id + artifact path)."""
+        return cls.MLFLOW_MODEL_ARTIFACTS
+
+    @classmethod
+    def validate_setup(cls) -> Dict[str, bool]:
         """Validate that all required files exist."""
-        model_paths = self.get_model_paths()
         validation_results = {}
 
-        for name, path in model_paths.items():
-            validation_results[name] = path.exists()
+        try:
+            # Get model paths
+            model_paths = cls.get_model_paths()
 
-        return validation_results
+            # Check each path
+            for name, path in model_paths.items():
+                path = Path(path)
+                exists = path.exists()
+                validation_results[name] = exists
+                # logger.info(f"Checking {name}: {'✓' if exists else '✗'} ({path})")
+
+            # Ensure required directories exist
+            cls.ensure_directories()
+
+            return validation_results
+
+        except Exception as e:
+            # logger.error(f"Setup validation failed: {e}")
+            return {
+                "yolo_corner_detect": False,
+                "yolo_text_detect": False,
+                "yolo_text_detect_v2": False,
+                "dictionary": False
+            }
 
 
-# Development configuration
 class DevelopmentConfig(Config):
     """Development-specific configuration."""
 
@@ -100,7 +168,6 @@ class DevelopmentConfig(Config):
         self.LOG_LEVEL = "DEBUG"
 
 
-# Production configuration
 class ProductionConfig(Config):
     """Production-specific configuration."""
 
@@ -110,7 +177,6 @@ class ProductionConfig(Config):
         self.LOG_LEVEL = "INFO"
 
 
-# Test configuration
 class TestConfig(Config):
     """Test-specific configuration."""
 
@@ -124,7 +190,6 @@ class TestConfig(Config):
 def get_config() -> Config:
     """Get configuration based on environment."""
     env = os.getenv("ENVIRONMENT", "development").lower()
-
     if env == "production":
         return ProductionConfig()
     elif env == "test":

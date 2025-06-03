@@ -57,7 +57,7 @@ setup:
 # Configuration setup
 setup-config:
 	@echo "Setting up configuration files..."
-	@if not exist .env (copy config\.env.example .env && echo "Created .env file from template. Please edit it with your settings.")
+	@if not exist .env (echo # Vietnamese ID Card OCR Configuration > .env && echo MLFLOW_ENABLED=false >> .env && echo Created .env file with MLflow disabled. Please edit it with your settings.)
 	@if not exist logs mkdir logs
 	@if not exist data\uploads mkdir data\uploads
 	@if not exist data\outputs mkdir data\outputs

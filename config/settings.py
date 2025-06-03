@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 @dataclass
 class ModelConfig:
     """Configuration for AI models."""
-    corner_detection_model: str = "data/models/corner_detection_model/weight/29_03_25-YOLOv11n-Corner-best_metrics.pt"
-    text_detection_model: str = "data/models/yolo_detect_text/best.pt"
-    text_detection_model_v2: str = "data/models/yolo_detect_text/bestv2.pt"
+    corner_detection_model: str = "models/corner_detection/weights/29_03_25-YOLOv11n-Corner-best_metrics.pt"
+    text_detection_model: str = "models/text_detection/weights/best.pt"
+    text_detection_model_v2: str = "models/text_detection_v2/weights/bestv2.pt"
     vietocr_config: str = "vgg_transformer"
     dictionary_path: str = "data/dictionary/dictionaries/hongocduc/words.txt"
     device: str = "auto"  # auto, cpu, cuda

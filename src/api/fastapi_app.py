@@ -2,7 +2,7 @@
 FastAPI endpoint for Vietnamese ID Card OCR API.
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -12,7 +12,9 @@ from PIL import Image
 import io
 import logging
 import sys
-from prometheus_client import Counter, Histogram, Gauge, start_http_server, generate_latest, CONTENT_TYPE_LATEST
+import locale
+import codecs
+from prometheus_client import Counter, Histogram, Gauge, start_http_server, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry
 from fastapi import Response
 import time
 import psutil
@@ -23,10 +25,15 @@ except ImportError:
     GPU_AVAILABLE = False
 from typing import Dict, Any, Optional, List
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
+import uuid
+import socket
+from pydantic import BaseModel
 import threading
 import uuid
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Try relative imports first, fallback to absolute imports for testing
 try:
@@ -34,15 +41,15 @@ try:
     from ..core.id_card_processor import IDCardProcessor
     from ..webhooks.alert_handlers import router as alert_router
     from ..config import get_config
-    from ..database.mongodb import MongoDBClient
-    from ..database.models import OCRResult, UserSession, ProcessingMetrics
+    from ..monitor import SystemMetricsCollector
+    from ..database import MongoDBClient, OCRResult
 except ImportError:
     from src.models.model_manager import ModelManager
     from src.core.id_card_processor import IDCardProcessor
     from src.webhooks.alert_handlers import router as alert_router
     from src.config import get_config
-    from src.database.mongodb import MongoDBClient
-    from src.database.models import OCRResult, UserSession, ProcessingMetrics
+    from src.monitor import SystemMetricsCollector
+    from src.database import MongoDBClient, OCRResult
 
 # Load configuration
 config = get_config()
@@ -63,17 +70,6 @@ if sys.platform == "win32":
             # If all else fails, we'll rely on the safe logging approach
             pass
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
-    format=config.LOG_FORMAT,
-    handlers=[
-        logging.FileHandler(config.LOGS_DIR / "api.log", encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
 # Enhanced Metrics for Comprehensive Monitoring
 REQUEST_COUNT = Counter('request_count_total', 'Total requests processed')
 PROCESSING_TIME = Histogram(
@@ -82,6 +78,8 @@ PROCESSING_TIME = Histogram(
 )
 ERROR_COUNT = Counter('error_count_total', 'Total errors encountered')
 SUCCESS_COUNT = Counter('success_count_total', 'Total successful requests')
+BATCH_REQUEST_COUNT = Counter(
+    'batch_request_count_total', 'Total batch requests processed')
 
 # Model Performance Metrics
 INFERENCE_TIME = Histogram(
@@ -145,91 +143,55 @@ error_logger = logging.getLogger('error')
 model_logger = logging.getLogger('model')
 metrics_logger = logging.getLogger('metrics')
 
-# Warn if GPU monitoring is not available
-if not GPU_AVAILABLE:
-    logger.warning("GPUtil not available. GPU metrics will be disabled.")
 
-# Set error logger to only log errors to error.log
-error_handler = logging.FileHandler('logs/error.log', encoding='utf-8')
-error_handler.setLevel(logging.ERROR)
-error_logger.addHandler(error_handler)
-
-# Set model logger for model-specific logs
-model_handler = logging.FileHandler('logs/model.log', encoding='utf-8')
-model_logger.addHandler(model_handler)
-
-# Set metrics logger for metrics-specific logs
-metrics_handler = logging.FileHandler('logs/metrics.log', encoding='utf-8')
-metrics_logger.addHandler(metrics_handler)
+class ProcessingConfig(BaseModel):
+    """Configuration for image processing."""
+    confidence_threshold: float = 0.5
+    nms_threshold: float = 0.3
+    enhance_image: bool = True
+    processing_method: str = "Auto (Gemini + OCR)"
 
 
-class SystemMetricsCollector:
-    """Collects system metrics for monitoring."""
+class HistoryFilter(BaseModel):
+    """Filter options for history endpoint."""
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    id_number: Optional[str] = None
+    success_only: bool = False
 
-    def __init__(self):
-        self.is_running = False
-        self.thread = None
 
-    def start_collection(self):
-        """Start collecting system metrics in background."""
-        if not self.is_running:
-            self.is_running = True
-            self.thread = threading.Thread(
-                target=self._collect_metrics, daemon=True)
-            self.thread.start()
-            logger.info("System metrics collection started")
+def find_available_port(start_port: int, max_attempts: int = 100) -> int:
+    """
+    Find an available port starting from start_port.
 
-    def stop_collection(self):
-        """Stop collecting system metrics."""
-        self.is_running = False
-        if self.thread:
-            self.thread.join()
-        logger.info("System metrics collection stopped")
+    Args:
+        start_port: The port to start checking from
+        max_attempts: Maximum number of ports to check
 
-    def _collect_metrics(self):
-        """Collect system metrics periodically."""
-        while self.is_running:
-            try:
-                # CPU Usage
-                cpu_percent = psutil.cpu_percent(interval=1)
-                CPU_USAGE.set(cpu_percent)
+    Returns:
+        An available port number
+    """
+    logger.info(f"Searching for available port starting from {start_port}")
 
-                # Memory Usage
-                memory = psutil.virtual_memory()
-                MEMORY_USAGE.set(memory.percent)
+    for i, port in enumerate(range(start_port, start_port + max_attempts)):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                # Set socket options for better Windows compatibility
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.settimeout(5.0)  # Add timeout to prevent hanging
+                s.bind(('localhost', port))
+                logger.info(f"Found available port: {port}")
+                return port
+        except OSError as e:
+            if i < 10:  # Only log first 10 attempts to avoid spam
+                logger.debug(f"Port {port} not available: {e}")
+            continue
+        except Exception as e:
+            logger.warning(f"Unexpected error testing port {port}: {e}")
+            continue
 
-                # Disk Usage
-                disk = psutil.disk_usage('/')
-                DISK_USAGE.labels(mountpoint='/').set(disk.percent)
-
-                # Network Stats
-                net_io = psutil.net_io_counters()
-                NETWORK_BYTES_SENT.inc(net_io.bytes_sent)
-                # GPU Usage (if available)
-                NETWORK_BYTES_RECV.inc(net_io.bytes_recv)
-                if GPU_AVAILABLE:
-                    try:
-                        gpus = GPUtil.getGPUs()
-                        for i, gpu in enumerate(gpus):
-                            GPU_USAGE.labels(gpu_id=str(i)).set(gpu.load * 100)
-                            GPU_MEMORY_USAGE.labels(gpu_id=str(i)).set(
-                                gpu.memoryUtil * 100)
-                            GPU_TEMPERATURE.labels(
-                                gpu_id=str(i)).set(gpu.temperature)
-                    except Exception as e:
-                        logger.debug(f"GPU metrics not available: {e}")
-                else:
-                    logger.debug(
-                        "GPU monitoring disabled - GPUtil not available")
-
-                # Log metrics
-                metrics_logger.info(
-                    f"CPU: {cpu_percent}%, Memory: {memory.percent}%, Disk: {disk.percent}%")
-
-            except Exception as e:
-                logger.error(f"Error collecting system metrics: {e}")
-
-            time.sleep(10)  # Collect every 10 seconds
+    raise RuntimeError(
+        f"Could not find an available port after {max_attempts} attempts starting from {start_port}")
 
 
 class IDCardAPI:
@@ -272,6 +234,11 @@ class IDCardAPI:
 
         # Feature store (simple in-memory cache for demo)
         self.feature_store = {}
+
+        # Khởi tạo MongoDB client
+        self.db_client = MongoDBClient()
+        self.db_client.connect()
+
         # Setup routes
         self._setup_routes()
 
@@ -281,20 +248,52 @@ class IDCardAPI:
         # Include webhook handlers
         self.app.include_router(alert_router)
 
+    def _process_single_image(self, image: np.ndarray, filename: str, config: ProcessingConfig) -> Dict[str, Any]:
+        """Process a single image with error handling."""
+        try:
+            start_time = time.time()
+            result = self.processor.process_id_card(image)
+            inference_time = time.time() - start_time
+
+            if result and 'extracted_info' in result:
+                # Log successful prediction
+                self._log_prediction(result, filename, inference_time)
+
+                # Check for duplicate ID
+                id_number = result['extracted_info'].get('id_number')
+                if id_number:
+                    duplicate_info = self._check_duplicate_id(id_number)
+                    result['duplicate_info'] = duplicate_info
+
+                return {
+                    'status': 'success',
+                    'extracted_info': result['extracted_info'],
+                    'message': 'Successfully processed',
+                    'filename': filename,
+                    'processing_time': inference_time
+                }
+            else:
+                return {
+                    'status': 'error',
+                    'message': 'Failed to extract information',
+                    'filename': filename
+                }
+        except Exception as e:
+            logger.error(f"Error processing image {filename}: {e}")
+            return {
+                'status': 'error',
+                'message': f"Error: {str(e)}",
+                'filename': filename
+            }
+
     def _setup_routes(self):
         """Setup API routes."""
 
         @self.app.post("/process-id-card/")
-        async def process_id_card(file: UploadFile = File(...)) -> Dict[str, Any]:
-            """
-            Process Vietnamese ID card image and extract information.
+        async def process_id_card(
+            file: UploadFile = File(...),
 
-            Args:
-                file: Uploaded image file
-
-            Returns:
-                JSON response with extracted information
-            """
+        ) -> Dict[str, Any]:
             start_time = time.time()
             REQUEST_COUNT.inc()
             session_id = str(uuid.uuid4())
@@ -326,191 +325,208 @@ class IDCardAPI:
 
                 # Record inference time
                 INFERENCE_TIME.observe(inference_time)
-
-                # Record confidence scores if available
-                if result and 'confidence' in result:
-                    confidence = result['confidence']
-                    CONFIDENCE_SCORE.observe(confidence)
-
-                    # Log low confidence predictions
-                    if confidence < 0.6:
-                        error_logger.warning(
-                            f"Low confidence prediction: {confidence:.3f} for file {file.filename}"
-                        )
-
                 # Log prediction with detailed metrics
                 self._log_prediction(result, file.filename, inference_time)
 
                 # Calculate processing time
                 processing_time = time.time() - start_time
+                # Create OCR result for MongoDB
                 PROCESSING_TIME.observe(processing_time)
 
-                # Create OCR result for MongoDB
-                success = result.get('status') == 'success'
-
-                if success:
+                if result.get('status') == 'success':
                     SUCCESS_COUNT.inc()
-                    model_logger.info(
-                        f"Successful prediction for {file.filename} in {processing_time:.3f}s")
-                    # Create OCR result
-                    ocr_result = OCRResult(
-                        session_id=session_id,
-                        image_filename=file.filename,
-                        extracted_info=result.get('extracted_info', {}),
-                        processing_time=processing_time,
-                        success=True,
-                        error_message=None
-                    )
-                    # Save to MongoDB if available
-                    try:
-                        if hasattr(self, 'mongo_available') and self.mongo_available:
-                            self.db_client.save_ocr_result(ocr_result)
-                            logger.info(
-                                f"Saved OCR result to MongoDB with session ID: {session_id}")
-                        else:
-                            logger.info(
-                                f"MongoDB not available, skipping database persistence for session ID: {session_id}")
-                    except Exception as db_error:
-                        logger.error(f"Failed to save to MongoDB: {db_error}")
+
+                    # Check for duplicate ID
+                    id_number = result.get(
+                        'extracted_info', {}).get('id_number')
+                    if id_number:
+                        duplicate_info = self._check_duplicate_id(id_number)
+                        if duplicate_info.get('is_duplicate'):
+                            result['duplicate_info'] = duplicate_info
                 else:
                     ERROR_COUNT.inc()
                     error_message = result.get('error', 'Unknown error')
                     error_logger.error(
-                        f"Failed prediction for {file.filename}: {error_message}")
+                        # Save to database
+                        f"Failed prediction for {file.filename}: {result.get('error', 'Unknown error')}")
+                session_id = str(uuid.uuid4())
+                ocr_result = OCRResult(
+                    session_id=session_id,
+                    image_filename=file.filename,
+                    extracted_info=result.get('extracted_info', {}),
+                    processing_time=processing_time,
+                    success=True
+                )
 
-                    # Create error OCR result
-                    ocr_result = OCRResult(
-                        session_id=session_id,
-                        image_filename=file.filename,
-                        extracted_info={},
-                        processing_time=processing_time,
-                        success=False,
-                        error_message=error_message
-                    )
-                    # Save to MongoDB if available
-                    try:
-                        if hasattr(self, 'mongo_available') and self.mongo_available:
-                            self.db_client.save_ocr_result(ocr_result)
-                            logger.info(
-                                f"Saved failed OCR result to MongoDB with session ID: {session_id}")
-                        else:
-                            logger.info(
-                                f"MongoDB not available, skipping database persistence for failed result, session ID: {session_id}")
-                    except Exception as db_error:
-                        logger.error(f"Failed to save to MongoDB: {db_error}")
+                result_id = self.db_client.save_ocr_result(ocr_result)
+                result['database_id'] = result_id
+                result['session_id'] = session_id
 
-                # Add session_id to response
-                response_data = {
-                    "status": "success",
-                    "processing_time": processing_time,
-                    "inference_time": inference_time,
-                    "filename": file.filename,
-                    "session_id": session_id,
-                    "result": result
-                }
-
-                return response_data
+                return result
 
             except HTTPException:
                 raise
             except Exception as e:
                 ERROR_COUNT.inc()
                 logger.error(f"Error processing image: {str(e)}")
-
-                # Create error OCR result
-                error_ocr_result = OCRResult(
-                    session_id=session_id,
-                    image_filename=file.filename if file else "unknown",
-                    extracted_info={},
-                    processing_time=time.time() - start_time,
-                    success=False,
-                    error_message=str(e)
-                )
-                # Save to MongoDB if available
-                try:
-                    if hasattr(self, 'mongo_available') and self.mongo_available:
-                        self.db_client.save_ocr_result(error_ocr_result)
-                        logger.info(
-                            f"Saved error OCR result to MongoDB with session ID: {session_id}")
-                    else:
-                        logger.info(
-                            f"MongoDB not available, skipping database persistence for error result, session ID: {session_id}")
-                except Exception as db_error:
-                    logger.error(
-                        f"Failed to save error to MongoDB: {db_error}")
-
                 raise HTTPException(
                     status_code=500,
                     detail=f"Internal server error: {str(e)}"
                 )
 
-        @self.app.get("/ocr-history/session/{session_id}")
-        async def get_ocr_history_by_session(session_id: str):
-            """
-            Get complete OCR data for a specific session ID.
+        @self.app.post("/process-batch/")
+        async def process_batch(
+            files: List[UploadFile] = File(...),
+            config: ProcessingConfig = Depends()
+        ) -> Dict[str, Any]:
+            start_time = time.time()
+            BATCH_REQUEST_COUNT.inc()
 
-            Args:
-                session_id: The session ID to retrieve OCR data for
+            try:
+                # Validate all files
+                for file in files:
+                    if not file.content_type.startswith('image/'):
+                        ERROR_COUNT.inc()
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"File {file.filename} must be an image"
+                        )
 
-            Returns:
-                Complete OCR results including all extracted data for the session
-            """
-            try:            # Check if MongoDB is connected
-                if not hasattr(self, 'mongo_available') or not self.mongo_available:
-                    logger.error(
-                        "MongoDB not connected, cannot retrieve OCR data by session")
-                    return {
-                        "status": "error",
-                        "message": "Database not available",
-                        "results": []
+                # Read all images
+                images = []
+                for file in files:
+                    contents = await file.read()
+                    nparr = np.frombuffer(contents, np.uint8)
+                    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    if image is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Could not decode image {file.filename}"
+                        )
+                    images.append((image, file.filename))
+
+                # Process images in parallel
+                results = []
+                total_images = len(images)
+
+                # Automatically determine number of workers based on CPU cores
+                max_workers = min(os.cpu_count() or 4, total_images)
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submit all tasks
+                    future_to_image = {
+                        executor.submit(self._process_single_image, image, filename, config): (image, filename)
+                        for image, filename in images
                     }
 
-                # Get complete OCR results for the session
-                results = self.db_client.get_ocr_results_by_session(session_id)
+                    # Process completed tasks as they finish
+                    for future in as_completed(future_to_image):
+                        result = future.result()
+                        results.append(result)
 
-                logger.info(
-                    f"Retrieved {len(results)} complete OCR results for session: {session_id}")
+                        # Log progress
+                        logger.info(
+                            f"Completed processing {len(results)}/{total_images} images")
 
-                return {
-                    "status": "success",
-                    "message": f"Retrieved {len(results)} complete OCR records for session: {session_id}",
-                    "results": results
+                # Calculate total processing time
+                total_time = time.time() - start_time
+
+                # Prepare response
+                response = {
+                    'status': 'success',
+                    'total_images': total_images,
+                    'processed_images': len(results),
+                    'total_processing_time': total_time,
+                    'results': results
                 }
+
+                SUCCESS_COUNT.inc()
+                return response
+
             except Exception as e:
-                logger.error(
-                    f"Error retrieving OCR history for session {session_id}: {str(e)}")
+                ERROR_COUNT.inc()
+                logger.error(f"Error in batch processing: {e}")
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Failed to retrieve OCR history: {str(e)}"
+                    detail=f"Error processing batch: {str(e)}"
                 )
 
-        @self.app.get("/health")
+        @self.app.get("/history/{session_id}")
+        async def get_processing_history(session_id: str):
+            """Get processing history for a session."""
+            try:
+                results = self.db_client.get_ocr_results_by_session(session_id)
+                return {
+                    'status': 'success',
+                    'session_id': session_id,
+                    'total_results': len(results),
+                    'results': results
+                }
+            except Exception as e:
+                logger.error(f"Error retrieving history: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error retrieving history: {str(e)}"
+                )
+
+        @self.app.get("/search/{id_number}")
+        async def search_by_id(id_number: str):
+            """Search for ID card by ID number."""
+            try:
+                results = self.db_client.search_by_id_number(id_number)
+                return {
+                    'status': 'success',
+                    'id_number': id_number,
+                    'total_occurrences': len(results),
+                    'results': results
+                }
+            except Exception as e:
+                logger.error(f"Error searching by ID: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error searching by ID: {str(e)}"
+                )        @ self.app.get("/health")        @ self.app.get("/health")
+
         async def health_check():
             """Health check endpoint."""
+            # Filter out gemini_client from models count
+            models_count = len(
+                [k for k in self.model_manager.models.keys() if k != 'gemini_client'])
             return {
                 "status": "healthy",
                 "timestamp": datetime.now().isoformat(),
-                "models_loaded": len(self.model_manager.models),
+                "models_loaded": models_count,
                 "version": "1.0.0"
             }
 
         @self.app.get("/metrics")
         async def get_metrics():
             """Prometheus metrics endpoint."""
-            return Response(
-                generate_latest(),
-                media_type=CONTENT_TYPE_LATEST
-            )
+            try:
+                # Return metrics from the default registry
+                return Response(
+                    generate_latest(),
+                    media_type=CONTENT_TYPE_LATEST
+                )
+            except Exception as e:
+                logger.error(f"Error generating metrics: {e}")
+                return Response(
+                    "# Error generating metrics\n",
+                    media_type=CONTENT_TYPE_LATEST
+                )        @ self.app.get("/stats")
 
-        @self.app.get("/stats")
         async def get_stats():
             """Get current API statistics."""
+            # Filter out gemini_client from models list
+            model_keys = [
+                k for k in self.model_manager.models.keys() if k != 'gemini_client']
             return {
                 "total_requests": REQUEST_COUNT._value.get(),
                 "successful_requests": SUCCESS_COUNT._value.get(),
                 "failed_requests": ERROR_COUNT._value.get(),
-                "models_loaded": list(self.model_manager.models.keys()),
-                "uptime": time.time() - self.start_time if hasattr(self, 'start_time') else 0}
+                "models_loaded": model_keys,
+                "uptime": time.time() - self.start_time if hasattr(self, 'start_time') else 0
+            }
 
         @self.app.get("/ocr-history")
         async def get_ocr_history(
@@ -594,17 +610,19 @@ class IDCardAPI:
                 raise HTTPException(
                     status_code=500,
                     detail=f"Failed to retrieve OCR history: {str(e)}"
-                )
+                )        @ self.app.get("/models")
 
-        @self.app.get("/models")
         async def get_model_info():
             """Get information about loaded models."""
+            # Filter out gemini_client from models info
+            filtered_models = {
+                k: v for k, v in self.model_manager.models.items() if k != 'gemini_client'}
             return {
-                "loaded_models": list(self.model_manager.models.keys()),
+                "loaded_models": list(filtered_models.keys()),
                 "device": self.model_manager.get_device(),
                 "model_details": {
                     name: "loaded" if model is not None else "failed"
-                    for name, model in self.model_manager.models.items()
+                    for name, model in filtered_models.items()
                 }
             }
 
@@ -624,6 +642,142 @@ class IDCardAPI:
                     status_code=500,
                     detail=f"Failed to reload models: {str(e)}"
                 )
+
+        @self.app.get("/history")
+        async def get_all_history(
+            page: int = Query(1, ge=1, description="Page number"),
+            page_size: int = Query(
+                10, ge=1, le=100, description="Items per page"),
+            filter: HistoryFilter = Depends()
+        ):
+            """
+            Get all processing history with pagination and filtering.
+
+            Args:
+                page: Page number (starts from 1)
+                page_size: Number of items per page (1-100)
+                filter: Filter options
+                    - start_date: Filter by start date
+                    - end_date: Filter by end date
+                    - id_number: Filter by ID number
+                    - success_only: Only show successful results
+            """
+            try:
+                # Build filter query
+                query = {}
+
+                # Date range filter
+                if filter.start_date or filter.end_date:
+                    date_filter = {}
+                    if filter.start_date:
+                        date_filter["$gte"] = filter.start_date
+                    if filter.end_date:
+                        date_filter["$lte"] = filter.end_date
+                    if date_filter:
+                        query["timestamp"] = date_filter
+
+                # ID number filter
+                if filter.id_number:
+                    query["extracted_info.id_number"] = filter.id_number
+
+                # Success filter
+                if filter.success_only:
+                    query["success"] = True
+
+                # Get total count
+                total_count = self.db_client._db[self.db_client.config.MONGODB_COLLECTION_RESULTS].count_documents(
+                    query)
+
+                # Calculate pagination
+                skip = (page - 1) * page_size
+                total_pages = (total_count + page_size - 1) // page_size
+
+                # Get paginated results
+                results = list(self.db_client._db[self.db_client.config.MONGODB_COLLECTION_RESULTS]
+                               .find(query)
+                               .sort("timestamp", -1)
+                               .skip(skip)
+                               .limit(page_size))
+
+                # Convert ObjectId to string and format datetime
+                for result in results:
+                    result["_id"] = str(result["_id"])
+                    if "timestamp" in result:
+                        result["timestamp"] = result["timestamp"].isoformat()
+
+                return {
+                    "status": "success",
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": total_pages,
+                    "total_items": total_count,
+                    "results": results
+                }
+
+            except Exception as e:
+                logger.error(f"Error retrieving history: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error retrieving history: {str(e)}"
+                )
+
+    def _check_duplicate_id(self, id_number: str) -> Dict[str, Any]:
+        """Check if ID number already exists in database."""
+        try:
+            results = self.db_client.search_by_id_number(id_number)
+            if results:
+                # Get the most recent result
+                latest_result = results[0]
+                return {
+                    'is_duplicate': True,
+                    'previous_result': latest_result,
+                    'total_occurrences': len(results)
+                }
+            return {'is_duplicate': False}
+        except Exception as e:
+            logger.error(f"Error checking duplicate ID: {e}")
+            return {'is_duplicate': False, 'error': str(e)}
+
+    def _log_prediction(self, result: Dict[str, Any], filename: str, inference_time: float):
+
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "filename": filename,
+            "inference_time": inference_time,
+            "result": result,
+            "model_version": "1.0.0",
+            "success": result.get('status') == 'success' if result else False
+        }
+
+        try:
+            # Log to different loggers based on content
+            if result and result.get('status') == 'success':
+                logger.info(
+                    f"Prediction: {json.dumps(log_entry, ensure_ascii=False, indent=None)}")
+            else:
+                error_logger.error(
+                    f"Failed prediction: {json.dumps(log_entry, ensure_ascii=False, indent=None)}")
+
+            # Log model-specific metrics
+            model_logger.info(
+                f"Model inference - Time: {inference_time:.3f}s, File: {filename}")
+
+        except UnicodeEncodeError as e:
+            # Fallback logging with ASCII encoding if Unicode fails
+            logger.warning(f"Unicode encoding error in logging: {e}")
+            safe_log_entry = {
+                "timestamp": log_entry["timestamp"],
+                "filename": filename,
+                "inference_time": inference_time,
+                "model_version": "1.0.0",
+                "success": log_entry["success"],
+                "unicode_error": "Vietnamese text removed due to encoding issues"
+            }
+            logger.info(
+                f"Prediction (safe): {json.dumps(safe_log_entry, ensure_ascii=True)}")
+
+        # Store in feature store (for demo purposes)
+        self.feature_store[datetime.now().isoformat()] = log_entry
 
     def _setup_events(self):
         """Setup FastAPI startup and shutdown events."""
@@ -654,57 +808,19 @@ class IDCardAPI:
 
             logger.info("API shutdown completed")
 
-    def _log_prediction(self, result: Dict[str, Any], filename: str, inference_time: float):
-        """Log prediction results for monitoring."""
-        confidence = result.get('confidence', 0.0) if result else 0.0
-
-        log_entry = {
-            "timestamp": datetime.now().isoformat(),
-            "filename": filename,
-            "inference_time": inference_time,
-            "confidence": confidence,
-            "result": result,
-            "model_version": "1.0.0",
-            "success": result.get('status') == 'success' if result else False
-        }
-
-        try:
-            # Log to different loggers based on content
-            if result and result.get('status') == 'success':
-                logger.info(
-                    f"Prediction: {json.dumps(log_entry, ensure_ascii=False, indent=None)}")
-            else:
-                error_logger.error(
-                    f"Failed prediction: {json.dumps(log_entry, ensure_ascii=False, indent=None)}")
-
-            # Log model-specific metrics
-            model_logger.info(
-                f"Model inference - Time: {inference_time:.3f}s, Confidence: {confidence:.3f}, File: {filename}")
-
-        except UnicodeEncodeError as e:
-            # Fallback logging with ASCII encoding if Unicode fails
-            logger.warning(f"Unicode encoding error in logging: {e}")
-            safe_log_entry = {
-                "timestamp": log_entry["timestamp"],
-                "filename": filename,
-                "inference_time": inference_time,
-                "confidence": confidence,
-                "model_version": "1.0.0",
-                "success": log_entry["success"],
-                "unicode_error": "Vietnamese text removed due to encoding issues"
-            }
-            logger.info(
-                f"Prediction (safe): {json.dumps(safe_log_entry, ensure_ascii=True)}")
-
-        # Store in feature store (for demo purposes)
-        self.feature_store[datetime.now().isoformat()] = log_entry
-
     def run(self, host: str = "0.0.0.0", port: int = 8080, metrics_port: int = 8000):
         """Run the FastAPI application."""
         self.start_time = time.time()
 
-        # Start system metrics collection
-        self.metrics_collector.start_collection()
+        # Find available ports
+        try:
+            port = find_available_port(port)
+            metrics_port = find_available_port(metrics_port)
+            logger.info(
+                f"Using port {port} for API server and port {metrics_port} for metrics server")
+        except RuntimeError as e:
+            logger.error(f"Failed to find available ports: {e}")
+            raise
 
         # Start Prometheus metrics server
         try:

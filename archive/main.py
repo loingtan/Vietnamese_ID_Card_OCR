@@ -6,11 +6,14 @@ import numpy as np
 from PIL import Image
 import io
 import logging
-from prometheus_client import Counter, Histogram, start_http_server
+from prometheus_client import Counter, Histogram, start_http_server, CollectorRegistry
 import time
 from typing import Dict, Any
 import json
 from datetime import datetime
+
+# Create a custom registry
+registry = CollectorRegistry()
 
 # Khởi tạo FastAPI app
 app = FastAPI(
@@ -28,11 +31,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Metrics
-REQUEST_COUNT = Counter('request_count', 'Total requests processed')
+# Metrics with custom registry
+REQUEST_COUNT = Counter('request_count', 'Total requests processed', registry=registry)
 PROCESSING_TIME = Histogram(
-    'processing_time_seconds', 'Time spent processing request')
-ERROR_COUNT = Counter('error_count', 'Total errors encountered')
+    'processing_time_seconds', 'Time spent processing request', registry=registry)
+ERROR_COUNT = Counter('error_count', 'Total errors encountered', registry=registry)
 
 # Logging configuration
 logging.basicConfig(

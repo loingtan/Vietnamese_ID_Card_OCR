@@ -10,7 +10,7 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
 from src.config import get_config
-from .models import OCRResult, UserSession, ProcessingMetrics
+from .models import OCRResult
 
 logger = logging.getLogger(__name__)
 

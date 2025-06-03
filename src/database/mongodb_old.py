@@ -10,7 +10,7 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
 from src.config import get_config
-from .models import OCRResult, UserSession, ProcessingMetrics
+from .models import OCRResult
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class MongoDBClient:
             self._db = self._client[self.config.MONGODB_DATABASE]
 
             # Test connection
-            self._client.admin.command('ping')
+            self._client.admin.command("ping")
             self._connected = True
             logger.info(
                 f"Connected to MongoDB: {self.config.MONGODB_DATABASE}")
@@ -54,7 +54,7 @@ class MongoDBClient:
             self._async_db = self._async_client[self.config.MONGODB_DATABASE]
 
             # Test connection
-            await self._async_client.admin.command('ping')
+            await self._async_client.admin.command("ping")
             self._connected = True
             logger.info(
                 f"Connected to MongoDB (async): {self.config.MONGODB_DATABASE}")
@@ -83,7 +83,7 @@ class MongoDBClient:
 
     def _create_indexes(self):
         """Create database indexes for better performance."""
-        if not self._db:
+        if self._db is None:
             return
 
         # OCR Results indexes
@@ -105,7 +105,7 @@ class MongoDBClient:
 
     async def _create_indexes_async(self):
         """Create database indexes for better performance (async)."""
-        if not self._async_db:
+        if self._async_db is None:
             return
 
         # OCR Results indexes
@@ -133,7 +133,7 @@ class MongoDBClient:
     # OCR Results operations
     def save_ocr_result(self, result: OCRResult) -> str:
         """Save OCR result to database."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -146,7 +146,7 @@ class MongoDBClient:
 
     async def save_ocr_result_async(self, result: OCRResult) -> str:
         """Save OCR result to database (async)."""
-        if not self._connected or not self._async_db:
+        if not self._connected or self._async_db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._async_db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -159,7 +159,7 @@ class MongoDBClient:
 
     def get_ocr_results_by_session(self, session_id: str) -> List[Dict[str, Any]]:
         """Get all OCR results for a session."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -172,7 +172,7 @@ class MongoDBClient:
 
     async def get_ocr_results_by_session_async(self, session_id: str) -> List[Dict[str, Any]]:
         """Get all OCR results for a session (async)."""
-        if not self._connected or not self._async_db:
+        if not self._connected or self._async_db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._async_db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -187,7 +187,7 @@ class MongoDBClient:
     def get_all_ocr_results(self, limit: int = 100, skip: int = 0, sort_by: str = "timestamp",
                             sort_order: int = -1, filter_criteria: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """
-        Get all OCR results with pagination and filtering.
+        Get all OCR results from the database with pagination and filtering.
 
         Args:
             limit: Maximum number of results to return
@@ -197,9 +197,9 @@ class MongoDBClient:
             filter_criteria: Dict with filter criteria for MongoDB query
 
         Returns:
-            List of OCR results
+            List of OCR results as dictionaries
         """
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -207,11 +207,11 @@ class MongoDBClient:
         # Use filter criteria or empty dict if none provided
         query_filter = filter_criteria if filter_criteria else {}
 
-        # Build sort specification
+        # Create sort specification
         sort_spec = [(sort_by, sort_order)]
 
         # Query with pagination and filtering
-        cursor = collection.find(query_filter, {'_id': 0}).sort(
+        cursor = collection.find(query_filter, {"_id": 0}).sort(
             sort_spec).skip(skip).limit(limit)
 
         # Convert cursor to list
@@ -225,7 +225,7 @@ class MongoDBClient:
                                         sort_by: str = "timestamp", sort_order: int = -1,
                                         filter_criteria: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """
-        Get all OCR results with pagination and filtering (async).
+        Get all OCR results from the database with pagination and filtering (async).
 
         Args:
             limit: Maximum number of results to return
@@ -235,9 +235,9 @@ class MongoDBClient:
             filter_criteria: Dict with filter criteria for MongoDB query
 
         Returns:
-            List of OCR results
+            List of OCR results as dictionaries
         """
-        if not self._connected or not self._async_db:
+        if not self._connected or self._async_db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._async_db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -245,11 +245,11 @@ class MongoDBClient:
         # Use filter criteria or empty dict if none provided
         query_filter = filter_criteria if filter_criteria else {}
 
-        # Build sort specification
+        # Create sort specification
         sort_spec = [(sort_by, sort_order)]
 
         # Query with pagination and filtering
-        cursor = collection.find(query_filter, {'_id': 0}).sort(
+        cursor = collection.find(query_filter, {"_id": 0}).sort(
             sort_spec).skip(skip).limit(limit)
 
         # Convert cursor to list
@@ -269,7 +269,7 @@ class MongoDBClient:
         Returns:
             Total count of OCR results
         """
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -291,7 +291,7 @@ class MongoDBClient:
         Returns:
             Total count of OCR results
         """
-        if not self._connected or not self._async_db:
+        if not self._connected or self._async_db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._async_db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -306,7 +306,7 @@ class MongoDBClient:
     # Session operations
     def save_session(self, session: UserSession) -> str:
         """Save user session to database."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_SESSIONS]
@@ -324,7 +324,7 @@ class MongoDBClient:
 
     async def save_session_async(self, session: UserSession) -> str:
         """Save user session to database (async)."""
-        if not self._connected or not self._async_db:
+        if not self._connected or self._async_db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._async_db[self.config.MONGODB_COLLECTION_SESSIONS]
@@ -342,7 +342,7 @@ class MongoDBClient:
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get user session by ID."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_SESSIONS]
@@ -353,7 +353,7 @@ class MongoDBClient:
     # Metrics operations
     def save_metrics(self, metrics: ProcessingMetrics) -> str:
         """Save processing metrics to database."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_METRICS]
@@ -365,7 +365,7 @@ class MongoDBClient:
 
     async def save_metrics_async(self, metrics: ProcessingMetrics) -> str:
         """Save processing metrics to database (async)."""
-        if not self._connected or not self._async_db:
+        if not self._connected or self._async_db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._async_db[self.config.MONGODB_COLLECTION_METRICS]
@@ -377,8 +377,10 @@ class MongoDBClient:
 
     def get_metrics_summary(self, hours: int = 24) -> Dict[str, Any]:
         """Get processing metrics summary for the last N hours."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
+
+        from datetime import timedelta
 
         collection = self._db[self.config.MONGODB_COLLECTION_METRICS]
         since = datetime.utcnow() - timedelta(hours=hours)
@@ -418,9 +420,10 @@ class MongoDBClient:
 
         return summary
 
+    # Data cleanup
     def cleanup_old_data(self, days: int = 30):
         """Clean up old data from the database."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         cutoff_date = datetime.utcnow() - timedelta(days=days)
