@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vietnamese ID Card - Alert Webhook Tester</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f7f9fc;
+        color: #333;
+      }
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background-color: #fff;
+        padding: 30px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #2c3e50;
+        margin-top: 0;
+        border-bottom: 2px solid #eee;
+        padding-bottom: 10px;
+      }
+      .form-group {
+        margin-bottom: 20px;
+      }
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+      select,
+      input,
+      textarea {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 16px;
+        box-sizing: border-box;
+      }
+      button {
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        padding: 12px 20px;
+        font-size: 16px;
+        cursor: pointer;
+        border-radius: 4px;
+        font-weight: 600;
+      }
+      button:hover {
+        background-color: #45a049;
+      }
+      .response {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 4px;
+        background-color: #f5f5f5;
+        border-left: 4px solid #4caf50;
+        display: none;
+      }
+      .error {
+        border-left-color: #f44336;
+      }
+      .tabs {
+        display: flex;
+        margin-bottom: 20px;
+        border-bottom: 1px solid #ddd;
+      }
+      .tab {
+        padding: 10px 20px;
+        cursor: pointer;
+        background-color: #f1f1f1;
+        border: 1px solid #ddd;
+        border-bottom: none;
+        margin-right: 5px;
+        border-top-left-radius: 4px;
+        border-top-right-radius: 4px;
+      }
+      .tab.active {
+        background-color: #fff;
+        border-bottom: 2px solid white;
+        position: relative;
+        top: 1px;
+        font-weight: bold;
+      }
+      .tab-content {
+        display: none;
+      }
+      .tab-content.active {
+        display: block;
+      }
+      .severity-critical {
+        background-color: #ffebee;
+        color: #c62828;
+      }
+      .severity-warning {
+        background-color: #fff8e1;
+        color: #ff8f00;
+      }
+      .severity-info {
+        background-color: #e3f2fd;
+        color: #1565c0;
+      }
+      .severity-badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 14px;
+        font-weight: bold;
+        margin-left: 10px;
+      }
+      #loadingIndicator {
+        display: none;
+        margin: 20px 0;
+        text-align: center;
+      }
+      .loader {
+        border: 5px solid #f3f3f3;
+        border-radius: 50%;
+        border-top: 5px solid #4caf50;
+        width: 30px;
+        height: 30px;
+        animation: spin 1s linear infinite;
+        display: inline-block;
+      }
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Vietnamese ID Card - Alert Webhook Tester</h1>
+
+      <div class="tabs">
+        <div class="tab active" onclick="showTab('webhook')">API Webhook</div>
+        <div class="tab" onclick="showTab('slack')">Direct Slack</div>
+        <div class="tab" onclick="showTab('alertmanager')">AlertManager</div>
+      </div>
+
+      <!-- API Webhook Tab -->
+      <div id="webhook" class="tab-content active">
+        <h2>Test API Webhook</h2>
+        <div class="form-group">
+          <label for="apiUrl">API URL:</label>
+          <input
+            type="text"
+            id="apiUrl"
+            value="http://localhost:8000"
+            placeholder="http://localhost:8000"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="alertType">Alert Type:</label>
+          <input type="text" id="alertType" value="test" placeholder="test" />
+        </div>
+
+        <div class="form-group">
+          <label for="severity">Severity:</label>
+          <select id="severity">
+            <option value="info">Info</option>
+            <option value="warning">Warning</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+
+        <button onclick="testWebhook()">Send Test Alert</button>
+
+        <div id="loadingIndicator">
+          <div class="loader"></div>
+          <p>Sending alert...</p>
+        </div>
+
+        <div id="webhookResponse" class="response">
+          <h3>Response:</h3>
+          <pre id="responseJson"></pre>
+        </div>
+      </div>
+
+      <!-- Direct Slack Tab -->
+      <div id="slack" class="tab-content">
+        <h2>Test Direct Slack Webhook</h2>
+        <div class="form-group">
+          <label for="slackWebhookUrl">Slack Webhook URL:</label>
+          <input
+            type="text"
+            id="slackWebhookUrl"
+            placeholder="https://hooks.slack.com/services/..."
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="slackChannel">Channel (optional):</label>
+          <input type="text" id="slackChannel" placeholder="#alerts" />
+        </div>
+
+        <div class="form-group">
+          <label for="slackTitle">Message Title:</label>
+          <input
+            type="text"
+            id="slackTitle"
+            value="Vietnamese ID Card Alert Test"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="slackMessage">Message:</label>
+          <textarea
+            id="slackMessage"
+            rows="5"
+            placeholder="Your alert message here..."
+          >
+This is a test alert from the Vietnamese ID Card system.</textarea
+          >
+        </div>
+
+        <div class="form-group">
+          <label for="slackSeverity">Severity:</label>
+          <select id="slackSeverity">
+            <option value="good">Info</option>
+            <option value="warning">Warning</option>
+            <option value="danger">Critical</option>
+          </select>
+        </div>
+
+        <button onclick="testSlackWebhook()">Send to Slack</button>
+
+        <div id="slackResponse" class="response">
+          <h3>Response:</h3>
+          <pre id="slackResponseText"></pre>
+        </div>
+      </div>
+
+      <!-- AlertManager Tab -->
+      <div id="alertmanager" class="tab-content">
+        <h2>Test AlertManager</h2>
+        <div class="form-group">
+          <label for="alertmanagerUrl">AlertManager URL:</label>
+          <input
+            type="text"
+            id="alertmanagerUrl"
+            value="http://localhost:9093"
+            placeholder="http://localhost:9093"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="amAlertName">Alert Name:</label>
+          <input
+            type="text"
+            id="amAlertName"
+            value="TestAlert"
+            placeholder="TestAlert"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="amService">Service:</label>
+          <select id="amService">
+            <option value="vnidcard-api">API</option>
+            <option value="system">System</option>
+            <option value="gpu">GPU</option>
+            <option value="vnidcard-model">Model</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="amSeverity">Severity:</label>
+          <select id="amSeverity">
+            <option value="info">Info</option>
+            <option value="warning">Warning</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="amSummary">Summary:</label>
+          <input
+            type="text"
+            id="amSummary"
+            value="Test alert for Vietnamese ID Card system"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="amDescription">Description:</label>
+          <textarea id="amDescription" rows="3">
+This is a test alert sent from the alert testing tool.</textarea
+          >
+        </div>
+
+        <button onclick="testAlertManager()">Send to AlertManager</button>
+
+        <div id="alertmanagerResponse" class="response">
+          <h3>Response:</h3>
+          <pre id="amResponseText"></pre>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Tab switching
+      function showTab(tabId) {
+        // Hide all tab contents
+        document.querySelectorAll(".tab-content").forEach((tab) => {
+          tab.classList.remove("active");
+        });
+
+        // Deactivate all tabs
+        document.querySelectorAll(".tab").forEach((tab) => {
+          tab.classList.remove("active");
+        });
+
+        // Show the selected tab content
+        document.getElementById(tabId).classList.add("active");
+
+        // Activate the clicked tab
+        event.currentTarget.classList.add("active");
+      }
+
+      // Test API Webhook
+      async function testWebhook() {
+        const apiUrl = document.getElementById("apiUrl").value;
+        const alertType = document.getElementById("alertType").value;
+        const severity = document.getElementById("severity").value;
+
+        const endpoint = `${apiUrl}/webhooks/test-alert`;
+        const params = new URLSearchParams({
+          alert_type: alertType,
+          severity: severity,
+        });
+
+        const responseDiv = document.getElementById("webhookResponse");
+        const responseJson = document.getElementById("responseJson");
+
+        // Show loading indicator
+        document.getElementById("loadingIndicator").style.display = "block";
+
+        try {
+          const response = await fetch(`${endpoint}?${params}`);
+          const data = await response.json();
+
+          responseDiv.style.display = "block";
+          responseDiv.className = response.ok ? "response" : "response error";
+          responseJson.textContent = JSON.stringify(data, null, 2);
+        } catch (error) {
+          responseDiv.style.display = "block";
+          responseDiv.className = "response error";
+          responseJson.textContent = `Error: ${error.message}`;
+        } finally {
+          // Hide loading indicator
+          document.getElementById("loadingIndicator").style.display = "none";
+        }
+      }
+
+      // Test Direct Slack Webhook
+      async function testSlackWebhook() {
+        const webhookUrl = document.getElementById("slackWebhookUrl").value;
+        const channel = document.getElementById("slackChannel").value;
+        const title = document.getElementById("slackTitle").value;
+        const message = document.getElementById("slackMessage").value;
+        const color = document.getElementById("slackSeverity").value;
+
+        if (!webhookUrl) {
+          alert("Please enter a Slack webhook URL");
+          return;
+        }
+
+        const payload = {
+          text: title,
+          attachments: [
+            {
+              text: message,
+              color: color,
+            },
+          ],
+        };
+
+        // Add channel if provided
+        if (channel && channel.trim()) {
+          payload.channel = channel;
+        }
+
+        const responseDiv = document.getElementById("slackResponse");
+        const responseText = document.getElementById("slackResponseText");
+
+        try {
+          const response = await fetch(webhookUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+
+          responseDiv.style.display = "block";
+          responseDiv.className = response.ok ? "response" : "response error";
+
+          if (response.ok) {
+            responseText.textContent = "Success: Message sent to Slack!";
+          } else {
+            const text = await response.text();
+            responseText.textContent = `Error: ${response.status} ${response.statusText}\n${text}`;
+          }
+        } catch (error) {
+          responseDiv.style.display = "block";
+          responseDiv.className = "response error";
+          responseText.textContent = `Error: ${error.message}`;
+        }
+      }
+
+      // Test AlertManager
+      async function testAlertManager() {
+        const alertmanagerUrl =
+          document.getElementById("alertmanagerUrl").value;
+        const alertName = document.getElementById("amAlertName").value;
+        const service = document.getElementById("amService").value;
+        const severity = document.getElementById("amSeverity").value;
+        const summary = document.getElementById("amSummary").value;
+        const description = document.getElementById("amDescription").value;
+
+        const currentTime = new Date().toISOString();
+        const endTime = new Date();
+        endTime.setMinutes(endTime.getMinutes() + 5);
+
+        const alert = [
+          {
+            status: "firing",
+            labels: {
+              alertname: alertName,
+              service: service,
+              severity: severity,
+              instance: "test-instance:9090",
+            },
+            annotations: {
+              summary: summary,
+              description: description,
+            },
+            startsAt: currentTime,
+            endsAt: endTime.toISOString(),
+            generatorURL: "http://localhost:9090/graph",
+          },
+        ];
+
+        const responseDiv = document.getElementById("alertmanagerResponse");
+        const responseText = document.getElementById("amResponseText");
+
+        try {
+          const response = await fetch(`${alertmanagerUrl}/api/v1/alerts`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(alert),
+          });
+
+          responseDiv.style.display = "block";
+          responseDiv.className = response.ok ? "response" : "response error";
+
+          if (response.ok) {
+            responseText.textContent = "Success: Alert sent to AlertManager!";
+          } else {
+            const text = await response.text();
+            responseText.textContent = `Error: ${response.status} ${response.statusText}\n${text}`;
+          }
+        } catch (error) {
+          responseDiv.style.display = "block";
+          responseDiv.className = "response error";
+          responseText.textContent = `Error: ${error.message}`;
+        }
+      }
+    </script>
+  </body>
+</html>

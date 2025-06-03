@@ -76,7 +76,8 @@ class AppConfig:
     debug: bool = os.getenv("DEBUG", "False").lower() == "true"
 
     # API Keys
-    google_ai_api_key: Optional[str] = os.getenv("GOOGLE_AI_API_KEY")
+    google_ai_api_key: Optional[str] = os.getenv(
+        "GOOGLE_AI_API_KEY", "AIzaSyAI1KcWgh7FSUvHmztQtcB8VYUeorzyJjY")
 
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

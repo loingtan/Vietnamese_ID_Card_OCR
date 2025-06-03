@@ -2,6 +2,8 @@
 Model loading and management utilities for Vietnamese ID Card OCR.
 """
 
+from src.config import get_config
+import mlflow
 import torch
 from ultralytics import YOLO
 from vietocr.tool.predictor import Predictor
@@ -14,8 +16,6 @@ import os
 import logging
 logger = logging.getLogger(__name__)
 
-import mlflow
-from src.config import get_config
 
 # try:
 #     from config.settings import get_config
@@ -29,7 +29,7 @@ from src.config import get_config
 class ModelManager:
     def __init__(self, api_key: str = None, config=None):
         """Initialize ModelManager with optional API key and config.
-        
+
         Args:
             api_key (str, optional): Google AI API key. Defaults to None.
             config (Config, optional): Configuration object. Defaults to None.
@@ -39,28 +39,31 @@ class ModelManager:
             from src.config import Config, get_config
             self.config = config if config is not None else get_config()
             if not isinstance(self.config, Config):
-                raise TypeError(f"Config must be instance of Config, got {type(self.config)}")
+                raise TypeError(
+                    f"Config must be instance of Config, got {type(self.config)}")
         except Exception as e:
             logger.error(f"Failed to load configuration: {e}")
-            raise RuntimeError("Could not initialize model manager: configuration error")
+            raise RuntimeError(
+                "Could not initialize model manager: configuration error")
 
         # Set device
-        self.device = ("cuda" if torch.cuda.is_available() 
-                      and not getattr(self.config, 'FORCE_CPU', False) 
-                      else "cpu")
-        
+        self.device = ("cuda" if torch.cuda.is_available()
+                       and not getattr(self.config, 'FORCE_CPU', False)
+                       else "cpu")
+
         # Initialize models dict and get paths
         self.models = {}
         # self.local_weights = self.config.get_model_paths()
         self.local_weights = self.config.get_train_model_paths()
-        
+
         # Set API key
-        self.api_key = api_key or getattr(self.config, 'GEMINI_API_KEY', None)
-        
+        self.api_key = api_key or getattr(
+            self.config, 'GEMINI_API_KEY', 'AIzaSyB4Ggzh2olHrk9qeL_-MsOuvij4vgwGONg')
+
         # Setup MLflow if enabled
         if getattr(self.config, 'MLFLOW_ENABLED', False):
             mlflow.set_tracking_uri(self.config.MLFLOW_TRACKING_URI)
-        
+
         # Load all models
         self._load_all_models()
 
@@ -76,23 +79,22 @@ class ModelManager:
 
     # def _setup_device(self):
     #     """Setup device based on config and available hardware."""
-    #     if (self.config and 
-    #         hasattr(self.config, 'models') and 
-    #         hasattr(self.config.models, 'device') and 
+    #     if (self.config and
+    #         hasattr(self.config, 'models') and
+    #         hasattr(self.config.models, 'device') and
     #         self.config.models.device != "auto"):
     #         return self.config.models.device
-        
+
     #     return "cuda" if torch.cuda.is_available() and not self.config.FORCE_CPU else "cpu"
 
     # def _setup_api_key(self, api_key):
     #     """Setup API key from provided key or config."""
     #     try:
     #         return api_key or (
-    #             self.config.google_ai_api_key 
-    #             if self.config and hasattr(self.config, 'google_ai_api_key') 
+    #             self.config.google_ai_api_key
+    #             if self.config and hasattr(self.config, 'google_ai_api_key')
     #             else None
-    #         )
-    #     except Exception as e:
+    #         )    #     except Exception as e:
     #         logger.warning(f"Error setting up API key: {e}")
     #         return api_key
 
@@ -101,28 +103,32 @@ class ModelManager:
         # Create model-specific download directory
         model_download_dir = Path(download_dir) / model_key
         model_download_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Try MLflow first if enabled
-        if self.config.MLFLOW_ENABLED:
-            client = mlflow.tracking.MlflowClient()
+        if getattr(self.config, 'MLFLOW_ENABLED', False):
             try:
-                artifact_info = self.config.MLFLOW_MODEL_ARTIFACTS.get(model_key)
+                client = mlflow.tracking.MlflowClient()
+                artifact_info = self.config.MLFLOW_MODEL_ARTIFACTS.get(
+                    model_key)
                 if artifact_info:
                     version = artifact_info.get("version", model_version)
-                    artifact_path = artifact_info.get("artifact_path", "").rstrip("/")
-                    
+                    artifact_path = artifact_info.get(
+                        "artifact_path", "").rstrip("/")
+
                     # Get run ID from model version
-                    model_version = client.get_model_version(model_key, version)
+                    model_version = client.get_model_version(
+                        model_key, version)
                     version_run_id = model_version.run_id
-                    print(f"Found run ID {version_run_id} for {model_key} version {version}")
-                    
+                    print(
+                        f"Found run ID {version_run_id} for {model_key} version {version}")
+
                     # Download using run ID and artifact path
                     download_path = mlflow.artifacts.download_artifacts(
                         run_id=version_run_id,
                         artifact_path=artifact_path,
                         dst_path=str(model_download_dir)
                     )
-                    
+
                     # Handle both file and directory downloads
                     download_path = Path(download_path)
                     if download_path.is_dir():
@@ -132,37 +138,45 @@ class ModelManager:
                             if model_file.exists() and model_file.suffix == '.pt':
                                 print(f"Using MLflow weights: {model_file}")
                                 return str(model_file)
-                        
+
                         # Fallback to searching for any .pt file
                         pt_files = list(download_path.glob("*.pt"))
                         if pt_files:
                             model_path = str(pt_files[0])
-                            print(f"Using MLflow weights from directory: {model_path}")
+                            print(
+                                f"Using MLflow weights from directory: {model_path}")
                             return model_path
                     elif download_path.suffix == '.pt':
                         print(f"Using MLflow weights: {download_path}")
                         return str(download_path)
-                    
+
             except Exception as e:
-                print(f"MLflow download failed for {model_key}: {e}")
+                logger.debug(f"MLflow download failed for {model_key}: {e}")
+                # Don't print to console if MLflow is disabled
 
         # Simple fallback to local weights
         try:
             local_path = self.local_weights[model_key]
             if not local_path:
-                raise FileNotFoundError(f"No local path configured for {model_key}\n")
-            
+                raise FileNotFoundError(
+                    f"No local path configured for {model_key}")
+
             local_path = Path(local_path)
             if not local_path.exists():
-                raise FileNotFoundError(f"Local weights not found at: {local_path}\n")
+                raise FileNotFoundError(
+                    f"Local weights not found at: {local_path}")
             if local_path.suffix != '.pt':
-                raise ValueError(f"Local weights file is not a .pt file: {local_path}")
-                
+                raise ValueError(
+                    f"Local weights file is not a .pt file: {local_path}")
+
             print(f"Using local weights: {local_path}")
+            logger.info(
+                f"Successfully loaded local model weights: {local_path}")
             return str(local_path)
-            
+
         except Exception as e:
-            raise FileNotFoundError(f"No valid weights found for {model_key}: {e}")
+            raise FileNotFoundError(
+                f"No valid weights found for {model_key}: {e}")
 
     def _load_all_models(self):
         self.models['vietocr'] = self._load_vietocr_model()
@@ -176,10 +190,15 @@ class ModelManager:
 
     def _load_vietocr_model(self):
         try:
-            config = Cfg.load_config_from_name('vgg_transformer')
-            config['cnn']['pretrained'] = True
-            config['device'] = self.device
-            predictor = Predictor(config)
+            # Suppress PyTorch warnings for VietOCR
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                config = Cfg.load_config_from_name('vgg_transformer')
+                config['cnn']['pretrained'] = True
+                config['device'] = self.device
+                predictor = Predictor(config)
+            logger.info("VietOCR model loaded successfully")
             return predictor
         except Exception as e:
             logger.error(f"Error loading VietOCR model: {e}")
@@ -187,7 +206,7 @@ class ModelManager:
 
     def _load_yolo_model(self, model_key: str, task: str = "detect") -> YOLO:
         """Generic YOLO model loader that handles both PT and ONNX formats.
-        
+
         Args:
             model_key (str): Key for model lookup
             task (str, optional): YOLO task type. Defaults to "detect".
@@ -250,10 +269,13 @@ class ModelManager:
     def _load_gemini_client(self):
         """Load Gemini client for AI processing."""
         try:
-            if not self.api_key:
-                return None
-            client = genai.Client(api_key=self.api_key)
-            return client
+            # Configure the API key
+            genai.configure(api_key="AIzaSyB4Ggzh2olHrk9qeL_-MsOuvij4vgwGONg")
+
+            # Create and return the GenerativeModel
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            logger.info("Gemini client loaded successfully")
+            return model
         except Exception as e:
             logger.error(f"Error loading Gemini client: {e}")
             return None

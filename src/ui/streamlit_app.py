@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..models.model_manager import ModelManager
 from ..core.id_card_processor import IDCardProcessor
-from src.database import MongoDBClient, OCRResult, UserSession
+from src.database import MongoDBClient, OCRResult
 from ..config import get_config
 
 # Configure logging
@@ -34,6 +34,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 class StreamlitUI:
     """Streamlit user interface for ID Card OCR."""
 
@@ -41,16 +42,16 @@ class StreamlitUI:
         self.port = port
         self.config = get_config()
         self.setup_page_config()
-        
+
         # Initialize model state in session state
         if 'model_manager' not in st.session_state:
             st.session_state.model_manager = None
         if 'processor' not in st.session_state:
             st.session_state.processor = None
-            
+
         self.model_manager = st.session_state.model_manager
         self.processor = st.session_state.processor
-        
+
         self.db_client = MongoDBClient()
         try:
             self.db_client.connect()
@@ -58,20 +59,10 @@ class StreamlitUI:
         except Exception as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
             st.error(f"Failed to connect to MongoDB: {e}")
-        
-        # Initialize session
+          # Initialize session
         if 'session_id' not in st.session_state:
             st.session_state.session_id = str(uuid.uuid4())
-            try:
-                session = UserSession(
-                    session_id=st.session_state.session_id,
-                    created_at=datetime.utcnow()
-                )
-                self.db_client.save_session(session)
-                logger.info(f"Created new session: {st.session_state.session_id}")
-            except Exception as e:
-                logger.error(f"Failed to create session: {e}")
-                st.error(f"Failed to create session: {e}")
+            logger.info(f"Created new session: {st.session_state.session_id}")
 
     def setup_page_config(self):
         """Configure Streamlit page settings."""
@@ -89,33 +80,34 @@ class StreamlitUI:
         # Add navigation with styled buttons
         st.sidebar.markdown("### 📱 Navigation")
         col1, col2 = st.sidebar.columns(2)
-        
+
         with col1:
             scan_button = st.button(
                 "🆔 Scan ID Card",
                 use_container_width=True,
                 help="Upload and process ID card images"
             )
-        
+
         with col2:
             history_button = st.button(
                 "📚 View History",
                 use_container_width=True,
                 help="View processing history"
             )
-        
+
         # Set active page based on button clicks
         if 'active_page' not in st.session_state:
             st.session_state.active_page = "Scan ID Card"
-            
+
         if scan_button:
             st.session_state.active_page = "Scan ID Card"
         elif history_button:
             st.session_state.active_page = "View History"
-            
+
         # Add visual feedback for active page
         st.sidebar.markdown("---")
-        st.sidebar.markdown(f"**Current Page:** {st.session_state.active_page}")
+        st.sidebar.markdown(
+            f"**Current Page:** {st.session_state.active_page}")
 
         # API Key input
         st.sidebar.markdown("### 🔑 API Settings")
@@ -170,8 +162,10 @@ class StreamlitUI:
         if st.session_state.model_manager is None:
             with st.spinner("Loading models... This may take a few minutes on first run."):
                 try:
-                    st.session_state.model_manager = ModelManager(api_key=api_key)
-                    st.session_state.processor = IDCardProcessor(st.session_state.model_manager)
+                    st.session_state.model_manager = ModelManager(
+                        api_key=api_key)
+                    st.session_state.processor = IDCardProcessor(
+                        st.session_state.model_manager)
                     self.model_manager = st.session_state.model_manager
                     self.processor = st.session_state.processor
                     st.success("✅ Models loaded successfully!")
@@ -225,47 +219,50 @@ class StreamlitUI:
         """Process a batch of images using multithreading."""
         results = []
         total_images = len(images)
-        
+
         # Create progress bar
         progress_bar = st.progress(0)
         status_text = st.empty()
         processed_count = 0
-        
+
         # Automatically determine if we should use multithreading
         # Use multithreading if we have more than 1 image
-        max_workers = min(os.cpu_count() or 4, total_images) if total_images > 1 else 1
-        
+        max_workers = min(os.cpu_count() or 4,
+                          total_images) if total_images > 1 else 1
+
         try:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all tasks
                 future_to_image = {
-                    executor.submit(self.process_single_image, image, idx, total_images): idx 
+                    executor.submit(self.process_single_image, image, idx, total_images): idx
                     for idx, image in enumerate(images)
                 }
-                
+
                 # Process completed tasks as they finish
                 for future in as_completed(future_to_image):
                     result = future.result()
                     results.append(result)
                     processed_count += 1
-                    
+
                     # Update progress
                     progress = processed_count / total_images
                     progress_bar.progress(progress)
-                    status_text.text(f"Processing image {processed_count} of {total_images}")
-                    
+                    status_text.text(
+                        f"Processing image {processed_count} of {total_images}")
+
                     # Log progress
-                    logger.info(f"Completed processing image {processed_count}/{total_images}")
-        
+                    logger.info(
+                        f"Completed processing image {processed_count}/{total_images}")
+
         except Exception as e:
             logger.error(f"Error in batch processing: {e}")
             st.error(f"Error in batch processing: {str(e)}")
-        
+
         finally:
             # Clear progress indicators
             progress_bar.empty()
             status_text.empty()
-        
+
         # Sort results by original index to maintain order
         results.sort(key=lambda x: x.get('index', 0))
         return results
@@ -283,7 +280,7 @@ class StreamlitUI:
             # Display uploaded images
             images = []
             cols = st.columns(min(3, len(uploaded_files)))
-            
+
             for idx, uploaded_file in enumerate(uploaded_files):
                 col = cols[idx % 3]
                 with col:
@@ -295,7 +292,8 @@ class StreamlitUI:
                     image_array = np.array(image)
                     if len(image_array.shape) == 3 and image_array.shape[2] == 3:
                         # Convert RGB to BGR for OpenCV
-                        image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+                        image_array = cv2.cvtColor(
+                            image_array, cv2.COLOR_RGB2BGR)
                         images.append(image_array)
 
             return images, st.container()
@@ -305,16 +303,18 @@ class StreamlitUI:
     def display_history(self):
         """Display history of processed ID cards."""
         st.title("📚 Processing History")
-        
+
         try:
             # Get results from MongoDB
-            results = self.db_client.get_ocr_results_by_session(st.session_state.session_id)
-            logger.info(f"Retrieved {len(results)} results for session {st.session_state.session_id}")
-            
+            results = self.db_client.get_ocr_results_by_session(
+                st.session_state.session_id)
+            logger.info(
+                f"Retrieved {len(results)} results for session {st.session_state.session_id}")
+
             if not results:
                 st.info("No processing history found.")
                 return
-                
+
             # Convert results to DataFrame
             history_data = []
             for result in results:
@@ -330,12 +330,13 @@ class StreamlitUI:
                     'Place of Residence': info.get('place_of_residence', ''),
                     'Date of Expiry': info.get('date_of_expiry', '')
                 })
-                
+
             if history_data:
                 df = pd.DataFrame(history_data)
-                df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+                df['Timestamp'] = pd.to_datetime(
+                    df['Timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
                 st.dataframe(df, use_container_width=True)
-                
+
                 # Download button
                 csv = df.to_csv(index=False)
                 st.download_button(
@@ -371,16 +372,18 @@ class StreamlitUI:
         """Display warning for duplicate ID card."""
         if duplicate_info.get('is_duplicate'):
             st.warning("⚠️ This ID card has been processed before!")
-            
+
             # Show previous processing details
             with st.expander("View Previous Processing Details"):
                 prev_result = duplicate_info['previous_result']
                 info = prev_result.get('extracted_info', {})
-                
+
                 # Display previous processing info
-                st.write(f"**Last Processed:** {prev_result.get('timestamp', 'Unknown')}")
-                st.write(f"**Total Occurrences:** {duplicate_info['total_occurrences']}")
-                
+                st.write(
+                    f"**Last Processed:** {prev_result.get('timestamp', 'Unknown')}")
+                st.write(
+                    f"**Total Occurrences:** {duplicate_info['total_occurrences']}")
+
                 # Display extracted information
                 st.write("**Extracted Information:**")
                 for key, value in info.items():
@@ -391,21 +394,21 @@ class StreamlitUI:
         """Display results for a batch of processed images."""
         with container:
             st.subheader("📋 Batch Processing Results")
-            
+
             # Create tabs for each image result
             tabs = st.tabs([f"Image {i+1}" for i in range(len(results))])
-            
+
             for idx, (tab, result) in enumerate(zip(tabs, results)):
                 with tab:
                     if result.get('status') == 'success':
                         extracted_info = result.get('extracted_info', {})
-                        
+
                         # Check for duplicate ID
                         id_number = extracted_info.get('id_number')
                         if id_number:
                             duplicate_info = self.check_duplicate_id(id_number)
                             self.display_duplicate_warning(duplicate_info)
-                        
+
                         # Display extracted information
                         if extracted_info:
                             info_data = []
@@ -422,13 +425,16 @@ class StreamlitUI:
 
                             for key, value in extracted_info.items():
                                 if value:
-                                    label = field_labels.get(key, key.replace('_', ' ').title())
-                                    info_data.append({'Field': label, 'Value': str(value)})
+                                    label = field_labels.get(
+                                        key, key.replace('_', ' ').title())
+                                    info_data.append(
+                                        {'Field': label, 'Value': str(value)})
 
                             if info_data:
                                 df = pd.DataFrame(info_data)
-                                st.dataframe(df, use_container_width=True, hide_index=True)
-                                
+                                st.dataframe(
+                                    df, use_container_width=True, hide_index=True)
+
                                 try:
                                     # Save to MongoDB
                                     ocr_result = OCRResult(
@@ -440,13 +446,17 @@ class StreamlitUI:
                                         detected_text_regions=[],
                                         success=True
                                     )
-                                    result_id = self.db_client.save_ocr_result(ocr_result)
-                                    logger.info(f"Saved OCR result with ID: {result_id}")
+                                    result_id = self.db_client.save_ocr_result(
+                                        ocr_result)
+                                    logger.info(
+                                        f"Saved OCR result with ID: {result_id}")
                                     st.success("✅ Results saved to database!")
                                 except Exception as e:
-                                    logger.error(f"Failed to save to MongoDB: {e}")
-                                    st.error(f"Failed to save to database: {e}")
-                                
+                                    logger.error(
+                                        f"Failed to save to MongoDB: {e}")
+                                    st.error(
+                                        f"Failed to save to database: {e}")
+
                                 # Download button for individual result
                                 csv = df.to_csv(index=False)
                                 st.download_button(
@@ -456,10 +466,12 @@ class StreamlitUI:
                                     mime="text/csv"
                                 )
                         else:
-                            st.warning("⚠️ No information could be extracted from the image.")
+                            st.warning(
+                                "⚠️ No information could be extracted from the image.")
                     else:
-                        st.error(f"❌ Processing failed: {result.get('message', 'Unknown error')}")
-            
+                        st.error(
+                            f"❌ Processing failed: {result.get('message', 'Unknown error')}")
+
             # Add batch download option
             if any(r.get('status') == 'success' for r in results):
                 all_data = []
@@ -468,7 +480,7 @@ class StreamlitUI:
                         info = result.get('extracted_info', {})
                         info['Image_Number'] = idx + 1
                         all_data.append(info)
-                
+
                 if all_data:
                     batch_df = pd.DataFrame(all_data)
                     batch_csv = batch_df.to_csv(index=False)
@@ -529,10 +541,10 @@ class StreamlitUI:
                     try:
                         # Process the batch
                         results = self.process_batch_images(images)
-                        
+
                         # Display results
                         self.display_batch_results(results, results_container)
-                        
+
                     except Exception as e:
                         st.error(f"❌ Error processing images: {str(e)}")
         else:
@@ -552,10 +564,12 @@ class StreamlitUI:
 
 def main():
     """Main entry point for the Streamlit application."""
-    parser = argparse.ArgumentParser(description='Vietnamese ID Card OCR Streamlit App')
-    parser.add_argument('--port', type=int, default=8501, help='Port to run the Streamlit app on')
+    parser = argparse.ArgumentParser(
+        description='Vietnamese ID Card OCR Streamlit App')
+    parser.add_argument('--port', type=int, default=8501,
+                        help='Port to run the Streamlit app on')
     args = parser.parse_args()
-    
+
     ui = StreamlitUI(port=args.port)
     ui.run()
 

@@ -27,7 +27,7 @@ try:
         validate_id_card_fields, load_vietnamese_dictionary
     )
     from ..database.mongodb import db_client
-    from ..database.models import OCRResult, ProcessingMetrics, IDCardInfo
+    from ..database.models import OCRResult
     from ..config import get_config
 except ImportError:
     from models.model_manager import ModelManager
@@ -61,44 +61,50 @@ class IDCardProcessor:
 
     def process_image_with_gemini(self, image: Image.Image) -> Dict[str, Any]:
         try:
-            client = self.model_manager.get_model('gemini_client')
-            if not client:
+            model = self.model_manager.get_model('gemini_client')
+            if not model:
                 return {}
 
-            img_bytes = pil_to_bytes(image, 'PNG')
+            # Convert PIL image to bytes
+            import io
+            import base64
 
+            img_bytes = io.BytesIO()
+            image.save(img_bytes, format='PNG')
+            img_bytes = img_bytes.getvalue()
+            img_b64 = base64.b64encode(img_bytes).decode()
+
+            # Create the image part for Gemini
             image_part = {
-                "inline_data": {
-                    "data": img_bytes,
-                    "mime_type": "image/png"
-                }
+                "mime_type": "image/png",
+                "data": img_b64
             }
 
             prompt = """
-            Analyze this Vietnamese ID card image and extract the following information in JSON format:
-            {
-                "id_number": "ID number",
-                "full_name": "Full name in Vietnamese",
-                "date_of_birth": "Date of birth in DD/MM/YYYY format",
-                "nationality": "Nationality (usually Việt Nam)",
-                "sex": "Gender (Nam/Nữ)",
-                "place_of_origin": "Place of origin in Vietnamese",
-                "place_of_residence": "Place of residence in Vietnamese",
-                "date_of_expiry": "Date of expiry in DD/MM/YYYY format if present"
-            }
+                Analyze this Vietnamese ID card image and extract the following information in JSON format:
+                {
+                    "id_number": "ID number",
+                    "full_name": "Full name in Vietnamese",
+                    "date_of_birth": "Date of birth in DD/MM/YYYY format",
+                    "nationality": "Nationality (usually Việt Nam)",
+                    "sex": "Gender (Nam/Nữ)",
+                    "place_of_origin": "Place of origin in Vietnamese",
+                    "place_of_residence": "Place of residence in Vietnamese",
+                    "date_of_expiry": "Date of expiry in DD/MM/YYYY format if present"
+                }
 
-            Rules:
-            1. Return ONLY the JSON object, no other text
-            2. If any field is not found, set it to null
-            3. Keep Vietnamese text as is, don't translate
-            4. Ensure dates are in DD/MM/YYYY format
-            5. For names, preserve the exact Vietnamese characters
-            """
+                Rules:
+                1. Return ONLY the JSON object, no other text
+                2. If any field is not found, set it to null
+                3. Keep Vietnamese text as is, don't translate
+                4. Ensure dates are in DD/MM/YYYY format
+                5. For names, preserve the exact Vietnamese characters
+                """
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-04-17",
-                contents=[image_part, prompt]
-            )            # Try to extract JSON from the response
+            # Generate content using the new API
+            response = model.generate_content([prompt, image_part])
+
+            # Try to extract JSON from the response
             try:
                 return json.loads(response.text)
             except json.JSONDecodeError:
@@ -393,26 +399,24 @@ class IDCardProcessor:
                 processed_image = cv2.resize(processed_image, (new_width, new_height),
                                              interpolation=cv2.INTER_LINEAR)
                 processed_image = sharpen_image(processed_image)
-            # pil_image = Image.fromarray(cv2.cvtColor(
-            #     processed_image, cv2.COLOR_BGR2RGB))
-            # Try Gemini processing first (if available)
+            pil_image = Image.fromarray(cv2.cvtColor(
+                processed_image, cv2.COLOR_BGR2RGB))
             logger.info(f"{processed_image.shape}")
-            info, image = self.process_image_with_vietocr(processed_image)
-            # gemini_result = self.process_image_with_gemini(pil_image)
+            # info, image = self.process_image_wtih_vietocr(processed_image)
+            gemini_result = self.process_image_with_gemini(pil_image)
 
-            # if gemini_result and any(gemini_result.values()):
-            #     return {
-            #         'status': 'success',
-            #         'method': 'gemini',
-            #         'extracted_info': validate_id_card_fields(gemini_result)
-            #     }
+            if gemini_result and any(gemini_result.values()):
+                return {
+                    'status': 'success',
+                    'extracted_info': validate_id_card_fields(gemini_result)
+                }
 
             # Fallback to traditional OCR pipeline
             # This would involve corner detection, perspective correction, text detection, etc.
             # For now, returning a placeholder
             return {
                 'status': 'success',
-                'extracted_info': info,
+                'extracted_info': {},
             }
 
         except Exception as e:
@@ -457,10 +461,6 @@ class IDCardProcessor:
                 image_filename=filename,
                 extracted_info=results.get('extracted_info', {}),
                 processing_time=processing_time,
-                confidence_scores=results.get('confidence_scores', {}),
-                detected_text_regions=results.get('detected_regions', []),
-                qr_code_data=results.get('qr_code_data'),
-                gemini_response=results.get('gemini_response'),
                 success=True
             )
 
@@ -488,7 +488,6 @@ class IDCardProcessor:
             # Add database info to results
             results['database_id'] = result_id
             results['processing_time'] = processing_time
-            results['completeness_score'] = id_card_info.get_completeness_score()
             results['is_valid'] = id_card_info.is_valid()
 
             return results
@@ -507,8 +506,6 @@ class IDCardProcessor:
                         image_filename=filename,
                         extracted_info={},
                         processing_time=processing_time,
-                        confidence_scores={},
-                        detected_text_regions=[],
                         success=False,
                         error_message=error_msg
                     )

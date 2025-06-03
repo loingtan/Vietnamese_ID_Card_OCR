@@ -1,0 +1,44 @@
+Model inference - Time: 0.050s, Confidence: 0.000, File: 613_jpg.rf.2ba5da47e2c02d535c465c9c247b8e12.jpg
+Model inference - Time: 0.053s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Model inference - Time: 0.039s, Confidence: 0.000, File: image28_jpg.rf.0f7b5f06a8c9b67706d5e41498965a4f.jpg
+Model inference - Time: 0.118s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Model inference - Time: 0.075s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Model inference - Time: 0.040s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Model inference - Time: 0.053s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Model inference - Time: 0.054s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Model inference - Time: 0.047s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Model inference - Time: 4.836s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Successful prediction for 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg in 5.039s
+Model inference - Time: 0.518s, Confidence: 0.000, File: image28_jpg.rf.0f7b5f06a8c9b67706d5e41498965a4f.jpg
+Model inference - Time: 0.462s, Confidence: 0.000, File: image28_jpg.rf.0f7b5f06a8c9b67706d5e41498965a4f.jpg
+Model inference - Time: 0.374s, Confidence: 0.000, File: image28_jpg.rf.0f7b5f06a8c9b67706d5e41498965a4f.jpg
+Model inference - Time: 0.302s, Confidence: 0.000, File: image28_jpg.rf.0f7b5f06a8c9b67706d5e41498965a4f.jpg
+Model inference - Time: 0.276s, Confidence: 0.000, File: image28_jpg.rf.0f7b5f06a8c9b67706d5e41498965a4f.jpg
+Model inference - Time: 4.425s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Successful prediction for 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg in 4.488s
+Model inference - Time: 4.030s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Successful prediction for 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg in 4.067s
+Model inference - Time: 1.230s, Confidence: 0.950, File: test_vietnamese_id.jpg
+Model inference - Time: 0.850s, Confidence: 0.880, File: vietnamese_test.jpg
+Model inference - Time: 1.450s, Confidence: 0.920, File: test_vietnamese_card.jpg
+Model inference - Time: 0.304s, Confidence: 0.000, File: test_vietnamese_id.png
+Model inference - Time: 2.100s, Confidence: 0.890, File: test_integration.jpg
+Model inference - Time: 0.500s, Confidence: 0.100, File: failed_vietnamese_card.jpg
+Model inference - Time: 0.369s, Confidence: 0.000, File: e9473826-72391af8-e1d6-4f6f-8f75-8afc20cc4318_jpg.rf.c7caddf5a303819fc33abb412b10ecd8.jpg
+Model inference - Time: 0.490s, Confidence: 0.000, File: e9473826-72391af8-e1d6-4f6f-8f75-8afc20cc4318_jpg.rf.c7caddf5a303819fc33abb412b10ecd8.jpg
+Model inference - Time: 4.169s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Successful prediction for 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg in 4.197s
+Model inference - Time: 4.845s, Confidence: 0.000, File: 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg
+Successful prediction for 9_jpg.rf.7d8a3714e80b05917731bc5a286c5472.jpg in 5.178s
+Model inference - Time: 10.155s, Confidence: 0.000, File: 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg
+Successful prediction for 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg in 10.211s
+Model inference - Time: 9.205s, Confidence: 0.000, File: 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg
+Successful prediction for 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg in 9.230s
+Model inference - Time: 9.121s, Confidence: 0.000, File: 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg
+Successful prediction for 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg in 9.149s
+Model inference - Time: 7.685s, Confidence: 0.000, File: 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg
+Successful prediction for 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg in 7.713s
+Model inference - Time: 9.833s, Confidence: 0.000, File: 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg
+Successful prediction for 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg in 9.872s
+Model inference - Time: 10.653s, Confidence: 0.000, File: 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg
+Successful prediction for 899cf1ed-9e3b-43f5-9a62-d86bcf7ad426.jpg in 10.706s

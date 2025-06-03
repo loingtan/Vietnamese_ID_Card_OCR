@@ -25,15 +25,18 @@ class Config:
     LOGS_DIR = BASE_DIR / "logs"
 
     # Model paths as class attributes
-    YOLO_CORNER_MODEL_PATH = MODEL_DIR / "yolo_corner_detect/weights/29_03_25-YOLOv11n-Corner-best_metrics.onnx"
+    YOLO_CORNER_MODEL_PATH = MODEL_DIR / \
+        "yolo_corner_detect/weights/29_03_25-YOLOv11n-Corner-best_metrics.onnx"
     YOLO_TEXT_MODEL_PATH = MODEL_DIR / "yolo_text_detect/weights/best.onnx"
     YOLO_TEXT_V2_MODEL_PATH = MODEL_DIR / "yolo_text_detect_v2/weights/bestv2.onnx"
     DICTIONARY_PATH = DATA_DIR / "dictionary/dictionaries/hongocduc/words.txt"
 
     # Training paths as class attributes
-    YOLO_TRAIN_CORNER_MODEL_PATH = MODEL_DIR / "yolo_corner_detect/weights/29_03_25-YOLOv11n-Corner-best_metrics.pt"
+    YOLO_TRAIN_CORNER_MODEL_PATH = MODEL_DIR / \
+        "yolo_corner_detect/weights/29_03_25-YOLOv11n-Corner-best_metrics.pt"
     YOLO_TRAIN_TEXT_MODEL_PATH = MODEL_DIR / "yolo_text_detect/weights/best.pt"
-    YOLO_TRAIN_TEXT_V2_MODEL_PATH = MODEL_DIR / "yolo_text_detect_v2/weights/bestv2.pt"
+    YOLO_TRAIN_TEXT_V2_MODEL_PATH = MODEL_DIR / \
+        "yolo_text_detect_v2/weights/bestv2.pt"
 
     def __init__(self):
         """Initialize instance-specific configuration."""
@@ -67,15 +70,16 @@ class Config:
         # Logging Configuration
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         self.LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        
-        # DVC
-        self.YOLO_CORNER_MODEL_DATASET =  self.MODEL_DIR / "yolo_corner_detect" / "datasets"
-        self.YOLO_TEXT_MODEL_DATASET = self.MODEL_DIR / "yolo_text_detect" / "datasets"
-        self.YOLO_TEXT_MODEL_V2_DATASET = self.MODEL_DIR / "yolo_text_detect_v2" / "datasets"
 
-        # === MLflow Integration ===
-        self.MLFLOW_ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
-        self.MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+        # DVC
+        self.YOLO_CORNER_MODEL_DATASET = self.MODEL_DIR / "yolo_corner_detect" / "datasets"
+        self.YOLO_TEXT_MODEL_DATASET = self.MODEL_DIR / "yolo_text_detect" / "datasets"
+        self.YOLO_TEXT_MODEL_V2_DATASET = self.MODEL_DIR / \
+            "yolo_text_detect_v2" / "datasets"        # === MLflow Integration ===
+        self.MLFLOW_ENABLED = os.getenv(
+            "MLFLOW_ENABLED", "false").lower() == "true"
+        self.MLFLOW_TRACKING_URI = os.getenv(
+            "MLFLOW_TRACKING_URI", "http://localhost:5000")
         self.MLFLOW_MODEL_ARTIFACTS = {
             "yolo_text_detect": {
                 "version": "1",
@@ -93,7 +97,7 @@ class Config:
                 "artifact_path": ""
             }
         }
-        
+
     @classmethod
     def ensure_directories(cls):
         """Ensure all required directories exist."""
@@ -108,7 +112,7 @@ class Config:
             "yolo_text_detect": cls.YOLO_TRAIN_TEXT_MODEL_PATH,
             "yolo_text_detect_v2": cls.YOLO_TRAIN_TEXT_V2_MODEL_PATH,
         }
-        
+
     @classmethod
     def get_model_paths(cls) -> Dict[str, Path]:
         """Get dictionary of model paths."""
@@ -118,7 +122,7 @@ class Config:
             "yolo_text_detect_v2": cls.YOLO_TEXT_V2_MODEL_PATH,
             "dictionary": cls.DICTIONARY_PATH
         }
-        
+
     @classmethod
     def get_mlflow_model_config(cls) -> Dict[str, Dict[str, str]]:
         """Return MLflow model mapping (run_id + artifact path)."""
@@ -128,23 +132,23 @@ class Config:
     def validate_setup(cls) -> Dict[str, bool]:
         """Validate that all required files exist."""
         validation_results = {}
-        
+
         try:
             # Get model paths
             model_paths = cls.get_model_paths()
-            
+
             # Check each path
             for name, path in model_paths.items():
                 path = Path(path)
                 exists = path.exists()
                 validation_results[name] = exists
                 # logger.info(f"Checking {name}: {'✓' if exists else '✗'} ({path})")
-                
+
             # Ensure required directories exist
             cls.ensure_directories()
-            
+
             return validation_results
-        
+
         except Exception as e:
             # logger.error(f"Setup validation failed: {e}")
             return {
