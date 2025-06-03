@@ -1,39 +1,39 @@
 
 services: 
-  # vnid-api:
-  #   build: 
-  #     context: ../../
-  #     dockerfile: deployment/docker/Dockerfile
-  #   container_name: vnidcard-api
-  #   ports:
-  #     - "8080:8080"  # API
-  #     - "8000:8000"  # Metrics
-  #   environment:
-  #     - ENVIRONMENT=production
-  #     - API_HOST=0.0.0.0
-  #     - API_PORT=8080
-  #     - METRICS_PORT=8000
-  #     - LOG_LEVEL=INFO
-  #     - ENABLE_STREAMLIT=false
-  #     - MONGODB_URL=mongodb://mongodb:27017
-  #     - MONGODB_DATABASE=vnid_card_ocr
-  #   volumes:
-  #     - ../../logs:/app/logs
-  #     - ../../data/models:/app/data/models
-  #     - ../../data/uploads:/app/data/uploads
-  #     - ../../data/outputs:/app/data/outputs
-  #     - ../../config/.env:/app/config/.env:ro
+  vnid-api:
+    build: 
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile
+    container_name: vnidcard-api
+    ports:
+      - "8080:8080"  # API
+      - "8000:8000"  # Metrics
+    environment:
+      - ENVIRONMENT=production
+      - API_HOST=0.0.0.0
+      - API_PORT=8080
+      - METRICS_PORT=8000
+      - LOG_LEVEL=INFO
+      - ENABLE_STREAMLIT=false
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DATABASE=vnid_card_ocr
+    volumes:
+      - ../../logs:/app/logs
+      - ../../data/models:/app/data/models
+      - ../../data/uploads:/app/data/uploads
+      - ../../data/outputs:/app/data/outputs
+      - ../../config/.env:/app/config/.env:ro
 
-  #   networks:
-  #     - vnidcard-network
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - mongodb
+    networks:
+      - vnidcard-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      - mongodb
 
   # Database
   mongodb:

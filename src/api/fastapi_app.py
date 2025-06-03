@@ -377,7 +377,6 @@ class IDCardAPI:
         @self.app.post("/process-batch/")
         async def process_batch(
             files: List[UploadFile] = File(...),
-            config: ProcessingConfig = Depends()
         ) -> Dict[str, Any]:
             start_time = time.time()
             BATCH_REQUEST_COUNT.inc()
