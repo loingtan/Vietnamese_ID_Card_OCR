@@ -393,25 +393,24 @@ class IDCardProcessor:
                 processed_image = cv2.resize(processed_image, (new_width, new_height),
                                              interpolation=cv2.INTER_LINEAR)
                 processed_image = sharpen_image(processed_image)
-            # pil_image = Image.fromarray(cv2.cvtColor(
-            #     processed_image, cv2.COLOR_BGR2RGB))
+            pil_image = Image.fromarray(cv2.cvtColor(
+                processed_image, cv2.COLOR_BGR2RGB))
             logger.info(f"{processed_image.shape}")
-            info, image = self.process_image_wtih_vietocr(processed_image)
-            # gemini_result = self.process_image_with_gemini(pil_image)
+            # info, image = self.process_image_wtih_vietocr(processed_image)
+            gemini_result = self.process_image_with_gemini(pil_image)
 
-            # if gemini_result and any(gemini_result.values()):
-            #     return {
-            #         'status': 'success',
-            #         'method': 'gemini',
-            #         'extracted_info': validate_id_card_fields(gemini_result)
-            #     }
+            if gemini_result and any(gemini_result.values()):
+                return {
+                    'status': 'success',
+                    'extracted_info': validate_id_card_fields(gemini_result)
+                }
 
             # Fallback to traditional OCR pipeline
             # This would involve corner detection, perspective correction, text detection, etc.
             # For now, returning a placeholder
             return {
                 'status': 'success',
-                'extracted_info': info,
+                'extracted_info': {},
             }
 
         except Exception as e:
@@ -456,10 +455,6 @@ class IDCardProcessor:
                 image_filename=filename,
                 extracted_info=results.get('extracted_info', {}),
                 processing_time=processing_time,
-                confidence_scores=results.get('confidence_scores', {}),
-                detected_text_regions=results.get('detected_regions', []),
-                qr_code_data=results.get('qr_code_data'),
-                gemini_response=results.get('gemini_response'),
                 success=True
             )
 
@@ -506,8 +501,6 @@ class IDCardProcessor:
                         image_filename=filename,
                         extracted_info={},
                         processing_time=processing_time,
-                        confidence_scores={},
-                        detected_text_regions=[],
                         success=False,
                         error_message=error_msg
                     )

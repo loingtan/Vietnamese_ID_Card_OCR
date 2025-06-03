@@ -16,10 +16,6 @@ class OCRResult:
     image_filename: str
     extracted_info: Dict[str, Any]
     processing_time: float
-    confidence_scores: Dict[str, float]
-    detected_text_regions: List[Dict[str, Any]]
-    qr_code_data: Optional[str] = None
-    gemini_response: Optional[str] = None
     success: bool = True
     error_message: Optional[str] = None
     timestamp: Optional[datetime] = None
@@ -35,10 +31,6 @@ class OCRResult:
             "image_filename": self.image_filename,
             "extracted_info": self.extracted_info,
             "processing_time": self.processing_time,
-            "confidence_scores": self.confidence_scores,
-            "detected_text_regions": self.detected_text_regions,
-            "qr_code_data": self.qr_code_data,
-            "gemini_response": self.gemini_response,
             "success": self.success,
             "error_message": self.error_message,
             "timestamp": self.timestamp
@@ -52,10 +44,6 @@ class OCRResult:
             image_filename=data["image_filename"],
             extracted_info=data["extracted_info"],
             processing_time=data["processing_time"],
-            confidence_scores=data["confidence_scores"],
-            detected_text_regions=data["detected_text_regions"],
-            qr_code_data=data.get("qr_code_data"),
-            gemini_response=data.get("gemini_response"),
             success=data.get("success", True),
             error_message=data.get("error_message"),
             timestamp=data.get("timestamp")

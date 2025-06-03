@@ -21,11 +21,12 @@ try:
     GPU_AVAILABLE = True
 except ImportError:
     GPU_AVAILABLE = False
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import json
 from datetime import datetime
 import os
 import threading
+import uuid
 
 # Try relative imports first, fallback to absolute imports for testing
 try:
@@ -33,11 +34,15 @@ try:
     from ..core.id_card_processor import IDCardProcessor
     from ..webhooks.alert_handlers import router as alert_router
     from ..config import get_config
+    from ..database.mongodb import MongoDBClient
+    from ..database.models import OCRResult, UserSession, ProcessingMetrics
 except ImportError:
     from src.models.model_manager import ModelManager
     from src.core.id_card_processor import IDCardProcessor
     from src.webhooks.alert_handlers import router as alert_router
     from src.config import get_config
+    from src.database.mongodb import MongoDBClient
+    from src.database.models import OCRResult, UserSession, ProcessingMetrics
 
 # Load configuration
 config = get_config()
@@ -249,7 +254,19 @@ class IDCardAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
-        )        # Initialize models
+        )
+        # Initialize MongoDB client
+        self.db_client = MongoDBClient()
+        try:
+            self.db_client.connect()
+            logger.info("Connected to MongoDB database")
+            self.mongo_available = True
+        except Exception as e:
+            logger.error(f"Failed to connect to MongoDB: {e}")
+            logger.warning("API will run without database persistence")
+            self.mongo_available = False
+
+        # Initialize models
         self.model_manager = ModelManager(api_key=api_key)
         self.processor = IDCardProcessor(self.model_manager)
 
@@ -280,6 +297,7 @@ class IDCardAPI:
             """
             start_time = time.time()
             REQUEST_COUNT.inc()
+            session_id = str(uuid.uuid4())
 
             try:
                 # Validate file type
@@ -288,7 +306,8 @@ class IDCardAPI:
                     raise HTTPException(
                         status_code=400,
                         detail="File must be an image"
-                    )                # Read and process image
+                    )
+                # Read and process image
                 contents = await file.read()
                 nparr = np.frombuffer(contents, np.uint8)
                 image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -326,31 +345,143 @@ class IDCardAPI:
                 processing_time = time.time() - start_time
                 PROCESSING_TIME.observe(processing_time)
 
-                if result.get('status') == 'success':
+                # Create OCR result for MongoDB
+                success = result.get('status') == 'success'
+
+                if success:
                     SUCCESS_COUNT.inc()
                     model_logger.info(
                         f"Successful prediction for {file.filename} in {processing_time:.3f}s")
+                    # Create OCR result
+                    ocr_result = OCRResult(
+                        session_id=session_id,
+                        image_filename=file.filename,
+                        extracted_info=result.get('extracted_info', {}),
+                        processing_time=processing_time,
+                        success=True,
+                        error_message=None
+                    )
+                    # Save to MongoDB if available
+                    try:
+                        if hasattr(self, 'mongo_available') and self.mongo_available:
+                            self.db_client.save_ocr_result(ocr_result)
+                            logger.info(
+                                f"Saved OCR result to MongoDB with session ID: {session_id}")
+                        else:
+                            logger.info(
+                                f"MongoDB not available, skipping database persistence for session ID: {session_id}")
+                    except Exception as db_error:
+                        logger.error(f"Failed to save to MongoDB: {db_error}")
                 else:
                     ERROR_COUNT.inc()
+                    error_message = result.get('error', 'Unknown error')
                     error_logger.error(
-                        f"Failed prediction for {file.filename}: {result.get('error', 'Unknown error')}")
+                        f"Failed prediction for {file.filename}: {error_message}")
 
-                return {
+                    # Create error OCR result
+                    ocr_result = OCRResult(
+                        session_id=session_id,
+                        image_filename=file.filename,
+                        extracted_info={},
+                        processing_time=processing_time,
+                        success=False,
+                        error_message=error_message
+                    )
+                    # Save to MongoDB if available
+                    try:
+                        if hasattr(self, 'mongo_available') and self.mongo_available:
+                            self.db_client.save_ocr_result(ocr_result)
+                            logger.info(
+                                f"Saved failed OCR result to MongoDB with session ID: {session_id}")
+                        else:
+                            logger.info(
+                                f"MongoDB not available, skipping database persistence for failed result, session ID: {session_id}")
+                    except Exception as db_error:
+                        logger.error(f"Failed to save to MongoDB: {db_error}")
+
+                # Add session_id to response
+                response_data = {
                     "status": "success",
                     "processing_time": processing_time,
                     "inference_time": inference_time,
                     "filename": file.filename,
+                    "session_id": session_id,
                     "result": result
                 }
+
+                return response_data
 
             except HTTPException:
                 raise
             except Exception as e:
                 ERROR_COUNT.inc()
                 logger.error(f"Error processing image: {str(e)}")
+
+                # Create error OCR result
+                error_ocr_result = OCRResult(
+                    session_id=session_id,
+                    image_filename=file.filename if file else "unknown",
+                    extracted_info={},
+                    processing_time=time.time() - start_time,
+                    success=False,
+                    error_message=str(e)
+                )
+                # Save to MongoDB if available
+                try:
+                    if hasattr(self, 'mongo_available') and self.mongo_available:
+                        self.db_client.save_ocr_result(error_ocr_result)
+                        logger.info(
+                            f"Saved error OCR result to MongoDB with session ID: {session_id}")
+                    else:
+                        logger.info(
+                            f"MongoDB not available, skipping database persistence for error result, session ID: {session_id}")
+                except Exception as db_error:
+                    logger.error(
+                        f"Failed to save error to MongoDB: {db_error}")
+
                 raise HTTPException(
                     status_code=500,
                     detail=f"Internal server error: {str(e)}"
+                )
+
+        @self.app.get("/ocr-history/session/{session_id}")
+        async def get_ocr_history_by_session(session_id: str):
+            """
+            Get complete OCR data for a specific session ID.
+
+            Args:
+                session_id: The session ID to retrieve OCR data for
+
+            Returns:
+                Complete OCR results including all extracted data for the session
+            """
+            try:            # Check if MongoDB is connected
+                if not hasattr(self, 'mongo_available') or not self.mongo_available:
+                    logger.error(
+                        "MongoDB not connected, cannot retrieve OCR data by session")
+                    return {
+                        "status": "error",
+                        "message": "Database not available",
+                        "results": []
+                    }
+
+                # Get complete OCR results for the session
+                results = self.db_client.get_ocr_results_by_session(session_id)
+
+                logger.info(
+                    f"Retrieved {len(results)} complete OCR results for session: {session_id}")
+
+                return {
+                    "status": "success",
+                    "message": f"Retrieved {len(results)} complete OCR records for session: {session_id}",
+                    "results": results
+                }
+            except Exception as e:
+                logger.error(
+                    f"Error retrieving OCR history for session {session_id}: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to retrieve OCR history: {str(e)}"
                 )
 
         @self.app.get("/health")
@@ -379,8 +510,91 @@ class IDCardAPI:
                 "successful_requests": SUCCESS_COUNT._value.get(),
                 "failed_requests": ERROR_COUNT._value.get(),
                 "models_loaded": list(self.model_manager.models.keys()),
-                "uptime": time.time() - self.start_time if hasattr(self, 'start_time') else 0
-            }
+                "uptime": time.time() - self.start_time if hasattr(self, 'start_time') else 0}
+
+        @self.app.get("/ocr-history")
+        async def get_ocr_history(
+            limit: int = 100,
+            skip: int = 0,
+            sort_by: str = "timestamp",
+            sort_order: int = -1,
+            session_id: Optional[str] = None,
+            success: Optional[bool] = None,
+            filename: Optional[str] = None
+        ):
+            """
+            Retrieve complete OCR processing data.
+
+            Args:
+                limit: Maximum number of results to return (default: 100)
+                skip: Number of results to skip for pagination (default: 0)
+                sort_by: Field to sort by (default: timestamp)
+                sort_order: Sort order, 1 for ascending, -1 for descending (default: -1)
+                session_id: Filter by session ID
+                success: Filter by success status
+                filename: Filter by image filename
+
+            Returns:
+                Complete OCR results including all extracted data with pagination info
+            """
+            try:
+                # Check if MongoDB is connected
+                if not hasattr(self, 'mongo_available') or not self.mongo_available:
+                    logger.error(
+                        "MongoDB not connected, cannot retrieve OCR history")
+                    return {
+                        "status": "error",
+                        "message": "Database not available",
+                        "results": [],
+                        "count": 0,
+                        "pagination": {
+                            "limit": limit,
+                            "skip": skip,
+                            "total": 0
+                        }
+                    }
+
+                # Build filter criteria
+                filter_criteria = {}
+                if session_id:
+                    filter_criteria["session_id"] = session_id
+                if success is not None:
+                    filter_criteria["success"] = success
+                if filename:
+                    filter_criteria["image_filename"] = {
+                        "$regex": filename, "$options": "i"}
+                  # Get OCR results from MongoDB with filters
+                results = self.db_client.get_all_ocr_results(
+                    limit=limit,
+                    skip=skip,
+                    sort_by=sort_by,
+                    sort_order=sort_order,
+                    filter_criteria=filter_criteria
+                )
+
+                # Get filtered count for pagination
+                total_count = self.db_client.get_ocr_results_count(
+                    filter_criteria)
+                logger.info(
+                    f"Retrieved {len(results)} complete OCR data records from MongoDB")
+
+                return {
+                    "status": "success",
+                    "message": f"Retrieved {len(results)} complete OCR records",
+                    "results": results,
+                    "count": len(results),
+                    "pagination": {
+                        "limit": limit,
+                        "skip": skip,
+                        "total": total_count
+                    }
+                }
+            except Exception as e:
+                logger.error(f"Error retrieving OCR history: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to retrieve OCR history: {str(e)}"
+                )
 
         @self.app.get("/models")
         async def get_model_info():

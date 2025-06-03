@@ -34,7 +34,7 @@ class MongoDBClient:
             self._db = self._client[self.config.MONGODB_DATABASE]
 
             # Test connection
-            self._client.admin.command("ping")
+            self._client.admin.command('ping')
             self._connected = True
             logger.info(
                 f"Connected to MongoDB: {self.config.MONGODB_DATABASE}")
@@ -54,7 +54,7 @@ class MongoDBClient:
             self._async_db = self._async_client[self.config.MONGODB_DATABASE]
 
             # Test connection
-            await self._async_client.admin.command("ping")
+            await self._async_client.admin.command('ping')
             self._connected = True
             logger.info(
                 f"Connected to MongoDB (async): {self.config.MONGODB_DATABASE}")
@@ -211,7 +211,7 @@ class MongoDBClient:
         sort_spec = [(sort_by, sort_order)]
 
         # Query with pagination and filtering
-        cursor = collection.find(query_filter, {"_id": 0}).sort(
+        cursor = collection.find(query_filter, {'_id': 0}).sort(
             sort_spec).skip(skip).limit(limit)
 
         # Convert cursor to list
@@ -249,7 +249,7 @@ class MongoDBClient:
         sort_spec = [(sort_by, sort_order)]
 
         # Query with pagination and filtering
-        cursor = collection.find(query_filter, {"_id": 0}).sort(
+        cursor = collection.find(query_filter, {'_id': 0}).sort(
             sort_spec).skip(skip).limit(limit)
 
         # Convert cursor to list

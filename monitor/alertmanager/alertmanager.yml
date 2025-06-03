@@ -1,5 +1,4 @@
 global:
-  # Slack webhook URL (replace with your actual webhook URL)
   slack_api_url: "https://hooks.slack.com/services/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"
 
 # Templates

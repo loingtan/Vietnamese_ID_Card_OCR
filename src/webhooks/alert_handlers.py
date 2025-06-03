@@ -78,9 +78,22 @@ class AlertProcessor:
     """Process and route alerts to appropriate notification channels"""
 
     def __init__(self):
+        # Get Slack webhook URL from environment or config
         self.slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+        if not self.slack_webhook_url and hasattr(config, 'SLACK_WEBHOOK_URL'):
+            self.slack_webhook_url = config.SLACK_WEBHOOK_URL
+
+        # If still no URL, use the default (but log a warning)
+        if not self.slack_webhook_url:
+            self.slack_webhook_url = "https://hooks.slack.com/services/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"
+            logger.warning(
+                "Using default Slack webhook URL. Set SLACK_WEBHOOK_URL environment variable for production.")
+
         self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+        logger.info(
+            f"AlertProcessor initialized - Slack: {'✓' if self.slack_webhook_url else '✗'}, Telegram: {'✓' if self.telegram_bot_token and self.telegram_chat_id else '✗'}")
 
     def process_alert(self, webhook_data: AlertmanagerWebhook) -> None:
         """Process incoming alert webhook"""
@@ -160,7 +173,7 @@ class AlertProcessor:
         """Format labels for display"""
         formatted = []
         for key, value in labels.items():
-            if key not in ["__name__", "alertname"]:  # Skip internal labels
+            if key not in ["__name__", "alertname"]: 
                 formatted.append(f"  • {key}: {value}")
         return "\n".join(formatted) if formatted else "  None"
 
@@ -181,9 +194,9 @@ class AlertProcessor:
 
     def _send_to_slack(self, message: str) -> None:
         """Send notification to Slack"""
-        if not self.slack_webhook_url:
-            logger.warning("Slack webhook URL not configured")
-            return
+        # if not self.slack_webhook_url:
+        #     logger.warning("Slack webhook URL not configured")
+        #     return
 
         try:
             # Convert markdown to Slack format
@@ -200,7 +213,7 @@ class AlertProcessor:
             }
 
             response = requests.post(
-                self.slack_webhook_url, json=payload, timeout=10)
+                "https://hooks.slack.com/services/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", json=payload, timeout=10)
             response.raise_for_status()
             logger.info("Alert sent to Slack successfully")
 
