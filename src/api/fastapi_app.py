@@ -488,11 +488,37 @@ class IDCardAPI:
             """Get processing history for a session."""
             try:
                 results = self.db_client.get_ocr_results_by_session(session_id)
+                
+                # Format results to match process-id-card endpoint format
+                formatted_results = []
+                for result in results:
+                    # Check for duplicate ID
+                    id_number = result.get('extracted_info', {}).get('id_number')
+                    duplicate_info = None
+                    if id_number:
+                        duplicate_info = self._check_duplicate_id(id_number)
+
+                    # Create formatted result
+                    formatted_result = {
+                        'status': 'success',
+                        'extracted_info': result.get('extracted_info', {}),
+                        'database_id': str(result.get('_id')),
+                        'session_id': result.get('session_id'),
+                        'is_duplicate': duplicate_info.get('is_duplicate', False) if duplicate_info else False,
+                        'processing_time': result.get('processing_time', 0.0)
+                    }
+
+                    # Add duplicate info if exists
+                    if duplicate_info and duplicate_info.get('is_duplicate'):
+                        formatted_result['duplicate_info'] = duplicate_info
+
+                    formatted_results.append(formatted_result)
+
                 return {
                     'status': 'success',
                     'session_id': session_id,
-                    'total_results': len(results),
-                    'results': results
+                    'total_results': len(formatted_results),
+                    'results': formatted_results
                 }
             except Exception as e:
                 logger.error(f"Error retrieving history: {str(e)}")
@@ -574,18 +600,6 @@ class IDCardAPI:
         ):
             """
             Retrieve complete OCR processing data.
-
-            Args:
-                limit: Maximum number of results to return (default: 100)
-                skip: Number of results to skip for pagination (default: 0)
-                sort_by: Field to sort by (default: timestamp)
-                sort_order: Sort order, 1 for ascending, -1 for descending (default: -1)
-                session_id: Filter by session ID
-                success: Filter by success status
-                filename: Filter by image filename
-
-            Returns:
-                Complete OCR results including all extracted data with pagination info
             """
             try:
                 # Check if MongoDB is connected
@@ -623,32 +637,42 @@ class IDCardAPI:
                     filter_criteria=filter_criteria
                 )
 
-                # Clean up results by removing unnecessary fields
-                cleaned_results = []
+                # Format results to match process-id-card endpoint format
+                formatted_results = []
                 for result in results:
-                    # Create a new dict with only the fields we want
-                    cleaned_result = {
-                        'session_id': result.get('session_id'),
-                        'image_filename': result.get('image_filename'),
+                    # Check for duplicate ID
+                    id_number = result.get('extracted_info', {}).get('id_number')
+                    duplicate_info = None
+                    if id_number:
+                        duplicate_info = self._check_duplicate_id(id_number)
+
+                    # Create formatted result
+                    formatted_result = {
+                        'status': 'success',
                         'extracted_info': result.get('extracted_info', {}),
-                        'processing_time': result.get('processing_time'),
-                        'success': result.get('success'),
-                        'error_message': result.get('error_message'),
-                        'timestamp': result.get('timestamp')
+                        'database_id': str(result.get('_id')),
+                        'session_id': result.get('session_id'),
+                        'is_duplicate': duplicate_info.get('is_duplicate', False) if duplicate_info else False,
+                        'processing_time': result.get('processing_time', 0.0)
                     }
-                    cleaned_results.append(cleaned_result)
+
+                    # Add duplicate info if exists
+                    if duplicate_info and duplicate_info.get('is_duplicate'):
+                        formatted_result['duplicate_info'] = duplicate_info
+
+                    formatted_results.append(formatted_result)
 
                 # Get filtered count for pagination
                 total_count = self.db_client.get_ocr_results_count(
                     filter_criteria)
                 logger.info(
-                    f"Retrieved {len(cleaned_results)} complete OCR data records from MongoDB")
+                    f"Retrieved {len(formatted_results)} complete OCR data records from MongoDB")
 
                 return {
                     "status": "success",
-                    "message": f"Retrieved {len(cleaned_results)} complete OCR records",
-                    "results": cleaned_results,
-                    "count": len(cleaned_results),
+                    "message": f"Retrieved {len(formatted_results)} complete OCR records",
+                    "results": formatted_results,
+                    "count": len(formatted_results),
                     "pagination": {
                         "limit": limit,
                         "skip": skip,
