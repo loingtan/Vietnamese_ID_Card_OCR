@@ -184,9 +184,7 @@ class ModelManager:
         self.models['yolo_text_detect_v2'] = self._load_yolo_text_detection_model_v2()
         self.models['yolo_corner_detect'] = self._load_yolo_corner_detection_model()
         self.models['text_corrector'] = self._load_text_correction_model()
-
-        if self.api_key:
-            self.models['gemini_client'] = self._load_gemini_client()
+        self.models['gemini_client'] = self._load_gemini_client()
 
     def _load_vietocr_model(self):
         try:

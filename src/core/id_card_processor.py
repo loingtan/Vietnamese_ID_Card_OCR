@@ -401,22 +401,20 @@ class IDCardProcessor:
                 processed_image = sharpen_image(processed_image)
             pil_image = Image.fromarray(cv2.cvtColor(
                 processed_image, cv2.COLOR_BGR2RGB))
-            logger.info(f"{processed_image.shape}")
-            # info, image = self.process_image_wtih_vietocr(processed_image)
-            gemini_result = self.process_image_with_gemini(pil_image)
+            logger.info(f"WTF: {processed_image.shape}")
 
-            if gemini_result and any(gemini_result.values()):
+            gemini_result = self.process_image_with_gemini(pil_image)
+            logger.info(f"Gemini result: {gemini_result}")
+            if gemini_result:
                 return {
-                    'status': 'success',
+                    'status': 'success-i',
                     'extracted_info': validate_id_card_fields(gemini_result)
                 }
+            info = self.process_image_with_vietocr(processed_image)
 
-            # Fallback to traditional OCR pipeline
-            # This would involve corner detection, perspective correction, text detection, etc.
-            # For now, returning a placeholder
             return {
-                'status': 'success',
-                'extracted_info': {},
+                'status': 'success-j',
+                'extracted_info': info,
             }
 
         except Exception as e:

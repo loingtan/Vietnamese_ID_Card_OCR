@@ -25,6 +25,7 @@ COPY *.py .
 COPY src/ ./src/
 COPY config/ ./config/
 COPY data/ ./data/
+COPY models/ ./models/
 RUN mkdir -p logs data/uploads data/outputs
 ENV PYTHONPATH=/app/src \
     ENVIRONMENT=production
