@@ -1,6 +1,8 @@
 .venv/*
 .idea/*
 .vscode/*
+.*/
+!.dvc/
 # Python cache
 __pycache__/
 *.py[cod]
@@ -28,3 +30,11 @@ yolo_detect_text/
 corner_detection_model/
 # Environment variables
 .env
+mlruns
+mlartifacts
+models/*/datasets/test
+models/*/datasets/*.zip
+models/*/datasets/*.ipynb
+runs/
+**/labels.cache
+logs/

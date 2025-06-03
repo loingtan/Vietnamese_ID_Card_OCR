@@ -26,6 +26,11 @@ scrape_configs:
     scrape_interval: 30s
     metrics_path: /health
 
+  # #  MLFlow Exporter
+  # - job_name: 'mlflow_exporter'
+  #   static_configs:
+  #     - targets: ['host.docker.internal:8050']  # Use 'localhost:8050' if not in Docker
+
   # System Metrics
   - job_name: "node-exporter"
     static_configs:
