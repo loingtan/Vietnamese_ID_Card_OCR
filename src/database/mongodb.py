@@ -83,7 +83,7 @@ class MongoDBClient:
 
     def _create_indexes(self):
         """Create database indexes for better performance."""
-        if not self._db:
+        if self._db is None:
             return
 
         # OCR Results indexes
@@ -131,7 +131,7 @@ class MongoDBClient:
     # OCR Results operations
     def save_ocr_result(self, result: OCRResult) -> str:
         """Save OCR result to database."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -157,7 +157,7 @@ class MongoDBClient:
 
     def get_ocr_results_by_session(self, session_id: str) -> List[Dict[str, Any]]:
         """Get all OCR results for a session."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -188,7 +188,7 @@ class MongoDBClient:
 
     def search_by_id_number(self, id_number: str) -> List[Dict[str, Any]]:
         """Search OCR results by ID number."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_RESULTS]
@@ -204,7 +204,7 @@ class MongoDBClient:
     # Session operations
     def save_session(self, session: UserSession) -> str:
         """Save user session to database."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_SESSIONS]
@@ -240,7 +240,7 @@ class MongoDBClient:
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get user session by ID."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_SESSIONS]
@@ -254,7 +254,7 @@ class MongoDBClient:
     # Metrics operations
     def save_metrics(self, metrics: ProcessingMetrics) -> str:
         """Save processing metrics to database."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         collection = self._db[self.config.MONGODB_COLLECTION_METRICS]
@@ -278,7 +278,7 @@ class MongoDBClient:
 
     def get_metrics_summary(self, hours: int = 24) -> Dict[str, Any]:
         """Get processing metrics summary for the last N hours."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         from datetime import timedelta
@@ -323,7 +323,7 @@ class MongoDBClient:
 
     def cleanup_old_data(self, days: int = 30):
         """Clean up old data from the database."""
-        if not self._connected or not self._db:
+        if not self._connected or self._db is None:
             raise RuntimeError("Not connected to MongoDB")
 
         from datetime import timedelta

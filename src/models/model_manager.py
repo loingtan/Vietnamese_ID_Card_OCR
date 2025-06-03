@@ -7,7 +7,7 @@ from ultralytics import YOLO
 from vietocr.tool.predictor import Predictor
 from vietocr.tool.config import Cfg
 from transformers import pipeline
-from google import genai
+import google.generativeai as genai
 from pathlib import Path
 import os
 
@@ -262,11 +262,9 @@ class ModelManager:
         return self.models.get(model_name)
 
     def get_device(self):
-
         return self.device
 
     def reload_model(self, model_name: str):
-
         if model_name == 'vietocr':
             self.models['vietocr'] = self._load_vietocr_model()
         elif model_name == 'yolo_text_detect':
