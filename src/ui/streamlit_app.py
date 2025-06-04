@@ -405,8 +405,25 @@ class StreamlitUI:
 
                         # Check for duplicate ID
                         id_number = extracted_info.get('id_number')
+                        duplicate_info = None
                         if id_number:
                             duplicate_info = self.check_duplicate_id(id_number)
+
+                        # Prepare response in the same format as process-id-card endpoint
+                        response = {
+                            'status': 'success',
+                            'extracted_info': extracted_info,
+                            'database_id': result.get('database_id'),
+                            'session_id': st.session_state.session_id,
+                            'is_duplicate': duplicate_info.get('is_duplicate', False) if duplicate_info else False,
+                            'processing_time': result.get('processing_time', 0.0)
+                        }
+
+                        if duplicate_info and duplicate_info.get('is_duplicate'):
+                            response['duplicate_info'] = duplicate_info
+
+                        # Display duplicate warning if applicable
+                        if response.get('is_duplicate'):
                             self.display_duplicate_warning(duplicate_info)
 
                         # Display extracted information
@@ -436,18 +453,17 @@ class StreamlitUI:
                                     df, use_container_width=True, hide_index=True)
 
                                 try:
-                                    # Save to MongoDB
+                                    # Save to MongoDB with the same format
                                     ocr_result = OCRResult(
                                         session_id=st.session_state.session_id,
                                         image_filename=f"uploaded_image_{idx+1}.jpg",
                                         extracted_info=extracted_info,
-                                        processing_time=0.0,
-                                        confidence_scores={},
-                                        detected_text_regions=[],
+                                        processing_time=result.get('processing_time', 0.0),
                                         success=True
                                     )
                                     result_id = self.db_client.save_ocr_result(
                                         ocr_result)
+                                    response['database_id'] = result_id
                                     logger.info(
                                         f"Saved OCR result with ID: {result_id}")
                                     st.success("✅ Results saved to database!")
